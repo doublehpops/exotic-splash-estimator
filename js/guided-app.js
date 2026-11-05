@@ -538,7 +538,7 @@ function garagePackageHTML(j){
   };
   return `<div class="fields">${pkgs.map(([id,label])=>'').join('')}
     <div class="finish-picker" role="group">${pkgs.map(([id,label])=>`<button type="button" class="finish-choice ${j.garagePackage===id?'active':''}" data-garage-package="${id}" aria-pressed="${j.garagePackage===id}"><b>${escape(label)}</b><small style="display:block;margin-top:4px;font-size:10px;color:var(--muted)">${escape(startFor(id))}</small></button>`).join('')}</div>
-    ${j.garagePackage!=='measured'?`<div class="notice">1/2/3-car selection uses the configured package <b>starting price</b> from the rate book (not floor $/sq ft). Material, topcoat, and condition/prep adjustments change the price when configured.</div>
+    ${j.garagePackage!=='measured'?`${(cat.disclaimer||'').trim()?`<div class="warn-banner"><b>Garage package baseline:</b> ${escape(cat.disclaimer.trim())}</div>`:''}<div class="notice">1/2/3-car selection uses the configured package <b>starting price</b> from the rate book (not floor $/sq ft). Material, topcoat, and condition/prep adjustments change the price when configured.</div>
       <div class="fields three">
         ${select('Material / system','job.garageStyle',[['solid','Solid'],['flake','Flake'],['metallic','Metallic'],['sealer','Clear seal'],['custom','Custom / other']])}
         ${select('Topcoat','job.garageTopcoat',[['protective','Protective (standard)'],['none','None noted'],['premium','Premium / upgraded']])}
@@ -1010,6 +1010,7 @@ function ratesView(){
   <details open><summary>Catalog packages — starting prices & adjustments ${owner?'':'🔒'}</summary><div class="detail-body">
   <div class="warn-banner"><b>No invented defaults.</b> Garage package flats, flatwork size-band starts, and seating per-item prices were <b>not</b> found as approved values in brand-brain / rate book searches. Leave blank (= unconfigured) until Double provides amounts. Unconfigured jobs stay <b>Pending</b> — never a misleading $0 final.</div>
   <h4 style="margin:12px 0 6px;font-size:13px">Garage packages</h4>
+  ${((state.settings.catalog&&state.settings.catalog.garage&&state.settings.catalog.garage.disclaimer)||'').trim()?`<div class="warn-banner"><b>Garage package baseline:</b> ${escape(String(state.settings.catalog.garage.disclaimer).trim())}</div>`:''}
   <div class="fields three">${lockedField('1-car starting price ($)','settings.catalog.garage.oneCarStarting','number','Blank = Starting price needed')}${lockedField('2-car starting price ($)','settings.catalog.garage.twoCarStarting','number')}${lockedField('3-car starting price ($)','settings.catalog.garage.threeCarStarting','number')}</div>
   <p class="method-note">>3-car must use measured sq ft (floor rate book) — no flat package field.</p>
   <div class="fields three">${lockedField('Material adj · solid ($)','settings.catalog.garage.materialAdj.solid','number')}${lockedField('Material adj · flake ($)','settings.catalog.garage.materialAdj.flake','number')}${lockedField('Material adj · metallic ($)','settings.catalog.garage.materialAdj.metallic','number')}${lockedField('Material adj · sealer ($)','settings.catalog.garage.materialAdj.sealer','number')}${lockedField('Material adj · custom ($)','settings.catalog.garage.materialAdj.custom','number')}${lockedField('Topcoat adj · premium ($)','settings.catalog.garage.topcoatAdj.premium','number')}</div>
@@ -1040,6 +1041,122 @@ function areaDimsHTML(a){
   }
   return 'Manual sq ft entry';
 }
+
+
+function fmtBaselineMoney(v){
+  if(v===null||v===undefined||v==='')return 'Pending';
+  const n=Number(v);
+  if(!Number.isFinite(n))return 'Pending';
+  return cash(n);
+}
+function baselineAdjRows(adj,labels){
+  const a=adj||{};
+  return Object.keys(labels).map(k=>`<tr><td>${escape(labels[k])}</td><td class="num">${fmtBaselineMoney(a[k])}</td></tr>`);
+}
+function baselineMoneyRows(pairs){
+  return pairs.map(([a,b])=>`<tr><td>${escape(a)}</td><td class="num">${fmtBaselineMoney(b)}</td></tr>`);
+}
+/** Internal-only sheet: current price-book baseline for this job's business area (services, catalog, and owner cost/product rates). */
+function baselineSheetHTML(j,s,owner,print){
+  const type=E.projectTypeOf(j);
+  const cat=Object.assign({},E.catalogDefaults||{},(s&&s.catalog)||{});
+  cat.garage=Object.assign({},(E.catalogDefaults&&E.catalogDefaults.garage)||{},(s.catalog&&s.catalog.garage)||{});
+  cat.flatwork=Object.assign({},(E.catalogDefaults&&E.catalogDefaults.flatwork)||{},(s.catalog&&s.catalog.flatwork)||{});
+  cat.seating=Object.assign({},(E.catalogDefaults&&E.catalogDefaults.seating)||{},(s.catalog&&s.catalog.seating)||{});
+  const rates=Object.assign({},(E.defaults&&E.defaults.rates)||{},(s&&s.rates)||{});
+  const products=Object.assign({},(E.defaults&&E.defaults.products)||{},(s&&s.products)||{});
+  const costs=Object.assign({},(E.defaults&&E.defaults.costs)||{},(s&&s.costs)||{});
+  const areaLabel={floor:'Floors (measured)',garage:'Garage packages',flatwork:'Flatwork (tables / countertops / bars)',seating:'Seating (chairs / stools)'}[type]||type;
+  let serviceBlocks='';
+  let notes='';
+  const floorRatePairs=[
+    ['Solid epoxy / sq ft',rates.solid],
+    ['Flake epoxy / sq ft',rates.flake],
+    ['Metallic epoxy / sq ft',rates.metallic],
+    ['Clear sealer / sq ft',rates.sealer],
+    ['Leveling / sq ft (¼ in)',rates.level],
+    ['Moisture-control primer / sq ft',rates.moisture],
+    ['Extra coat / sq ft',rates.extraCoat],
+    ['Medium flake extra / sq ft',rates.mediumFlakeExtra],
+    ['Full flake extra / sq ft',rates.fullFlakeExtra],
+    ['Coating removal / sq ft',rates.removal],
+    ['Patch kit (ea)',rates.patch]
+  ];
+  if(type==='floor'||(type==='garage'&&E.garageUsesMeasured(j))){
+    serviceBlocks+=tableHTML(['Service (selling)','Baseline'],baselineMoneyRows(floorRatePairs));
+  }
+  if(type==='garage'){
+    notes=(cat.garage.disclaimer||'').trim()?`<div class="warn-banner"><b>Garage package baseline:</b> ${escape(String(cat.garage.disclaimer).trim())}</div>`:'';
+    serviceBlocks+=`<h4 style="margin:12px 0 6px;font-size:13px">Package starting prices</h4>`+tableHTML(['Package','Baseline'],baselineMoneyRows([
+      ['1-car starting',cat.garage.oneCarStarting],
+      ['2-car starting',cat.garage.twoCarStarting],
+      ['3-car starting',cat.garage.threeCarStarting]
+    ]));
+    serviceBlocks+=`<h4 style="margin:12px 0 6px;font-size:13px">Material adjustments</h4>`+tableHTML(['Adjustment','Baseline'],baselineAdjRows(cat.garage.materialAdj,{solid:'Solid',flake:'Flake',metallic:'Metallic',sealer:'Sealer',custom:'Custom'}));
+    serviceBlocks+=`<h4 style="margin:12px 0 6px;font-size:13px">Topcoat adjustments</h4>`+tableHTML(['Adjustment','Baseline'],baselineAdjRows(cat.garage.topcoatAdj,{protective:'Protective',none:'None',premium:'Premium'}));
+    serviceBlocks+=`<h4 style="margin:12px 0 6px;font-size:13px">Condition adjustments</h4>`+tableHTML(['Adjustment','Baseline'],baselineAdjRows(cat.garage.conditionAdj,{unknown:'Unknown',good:'Good',sound:'Sound',fair:'Fair',poor:'Poor',critical:'Critical',paint:'Paint / coating',adhesive:'Adhesive'}));
+    serviceBlocks+=`<h4 style="margin:12px 0 6px;font-size:13px">Prep adjustments</h4>`+tableHTML(['Adjustment','Baseline'],baselineAdjRows(cat.garage.prepAdj,{cracks:'Cracks / joints',spalling:'Spalling',coatingRemoval:'Coating removal',patching:'Patching',leveling:'Leveling',moisture:'Moisture-control primer'}));
+    if(!E.garageUsesMeasured(j)){
+      serviceBlocks+=`<p class="method-note">&gt;3-car / measured garages use the floor per-sq-ft rate book below.</p>`+tableHTML(['Service (selling)','Baseline'],baselineMoneyRows([
+        ['Solid / sq ft',rates.solid],['Flake / sq ft',rates.flake],['Metallic / sq ft',rates.metallic],['Sealer / sq ft',rates.sealer],['Level / sq ft',rates.level],['Moisture / sq ft',rates.moisture]
+      ]));
+    }
+  } else if(type==='flatwork'){
+    const bandRows=(cat.flatwork.sizeBands||[]).map(b=>`<tr><td>${escape(b.label||b.id)}</td><td class="num">${fmtBaselineMoney(b.starting)}</td></tr>`);
+    bandRows.push(`<tr><td>Custom / override starting</td><td class="num">${fmtBaselineMoney(cat.flatwork.customStarting)}</td></tr>`);
+    serviceBlocks+=`<h4 style="margin:12px 0 6px;font-size:13px">Size-band starting prices</h4>`+tableHTML(['Band','Baseline'],bandRows);
+    serviceBlocks+=`<h4 style="margin:12px 0 6px;font-size:13px">Material adjustments</h4>`+tableHTML(['Adjustment','Baseline'],baselineAdjRows(cat.flatwork.materialAdj,{solid:'Solid',flake:'Flake',metallic:'Metallic',sealer:'Sealer',custom:'Custom'}));
+    serviceBlocks+=`<h4 style="margin:12px 0 6px;font-size:13px">Topcoat adjustments</h4>`+tableHTML(['Adjustment','Baseline'],baselineAdjRows(cat.flatwork.topcoatAdj,{protective:'Protective',none:'None',premium:'Premium'}));
+    serviceBlocks+=`<h4 style="margin:12px 0 6px;font-size:13px">Condition adjustments</h4>`+tableHTML(['Adjustment','Baseline'],baselineAdjRows(cat.flatwork.conditionAdj,{unknown:'Unknown',good:'Good',fair:'Fair',poor:'Poor',critical:'Critical'}));
+  } else if(type==='seating'){
+    const by=cat.seating.byType||{};
+    serviceBlocks+=`<h4 style="margin:12px 0 6px;font-size:13px">Per-item starting prices</h4>`+tableHTML(['Item type','Baseline / item'],baselineMoneyRows([
+      ['Chair',by.chair],['Stool',by.stool],['Other seating',by.other]
+    ]));
+    serviceBlocks+=`<h4 style="margin:12px 0 6px;font-size:13px">Material adjustments</h4>`+tableHTML(['Adjustment','Baseline'],baselineAdjRows(cat.seating.materialAdj,{solid:'Solid',flake:'Flake',metallic:'Metallic',sealer:'Sealer',custom:'Custom'}));
+    serviceBlocks+=`<h4 style="margin:12px 0 6px;font-size:13px">Topcoat adjustments</h4>`+tableHTML(['Adjustment','Baseline'],baselineAdjRows(cat.seating.topcoatAdj,{protective:'Protective',none:'None',premium:'Premium'}));
+    serviceBlocks+=`<h4 style="margin:12px 0 6px;font-size:13px">Condition adjustments</h4>`+tableHTML(['Adjustment','Baseline'],baselineAdjRows(cat.seating.conditionAdj,{unknown:'Unknown',good:'Good',fair:'Fair',poor:'Poor',critical:'Critical'}));
+  }
+  const productRows=Object.keys(products).map(k=>{
+    const pr=products[k]||{};
+    return `<tr><td>${escape(pr.label||k)}</td><td class="num">${fmtBaselineMoney(pr.price)}</td><td class="num">${escape(String(pr.size??'—'))} ${escape(pr.unit||'')}</td><td class="num">${pr.coverage?num(pr.coverage):'—'}</td></tr>`;
+  });
+  const costPairs=[
+    ['Loaded labor / person-hour ($)',costs.labor],
+    ['Vehicle cost / mile ($)',costs.mile],
+    ['Material waste (%)',costs.waste],
+    ['Business overhead / job ($)',costs.overhead],
+    ['Contingency reserve (%)',costs.contingency],
+    ['Grinder + extractor / day ($)',costs.rentalDay],
+    ['Diamond tooling allowance ($)',costs.tooling],
+    ['Supplies allowance ($)',costs.supplies],
+    ['Dust bags / filters ($)',costs.dust],
+    ['Disposal allowance ($)',costs.disposal],
+    ['Prep production (sq ft / person-hr)',costs.prepProduction],
+    ['Coat production (sq ft / person-hr)',costs.coatProduction],
+    ['Level production (sq ft / person-hr)',costs.levelProduction],
+    ['Removal production (sq ft / person-hr)',costs.removalProduction],
+    ['Setup hours',costs.setupHours],
+    ['Default markup (%)',costs.markup]
+  ];
+  const costRowsHtml=costPairs.map(([a,b])=>{
+    const pctOrQty=/\(%\)|person-hr\)|Setup hours/.test(a);
+    const shown=(b===null||b===undefined||b==='')?'Pending':(pctOrQty?num(b):fmtBaselineMoney(b));
+    return `<tr><td>${escape(a)}</td><td class="num">${shown}</td></tr>`;
+  });
+  const sectionClass=print?'baseline-sheet':'card baseline-sheet';
+  return `<section class="${sectionClass}" style="margin-top:16px"><h3>0. Current baseline — ${escape(areaLabel)}</h3>
+  <p class="method-note">Live price-book baseline for this business area. Pending = unconfigured (blocks a finalized quote). Selling figures are what staff quotes from; product package costs and internal cost rates are owner-only.</p>
+  ${notes}
+  <h4 style="margin:12px 0 6px;font-size:13px">Services &amp; catalog (selling)</h4>
+  ${serviceBlocks||'<p class="method-note">No service baselines for this area.</p>'}
+  ${owner?`<h4 style="margin:12px 0 6px;font-size:13px">Product package costs (owner)</h4>${tableHTML(['Product','Package $','Size','Coverage'],productRows)}
+  <h4 style="margin:12px 0 6px;font-size:13px">Internal cost rates (owner)</h4>${tableHTML(['Cost / rate','Baseline'],costRowsHtml)}
+  <p class="method-note">Owner cost/product fields are separate from customer selling rates. Chicago Nov 2026 baseline loaded selling rates/catalog only unless you also saved owner costs.</p>`
+  :`<div class="info-banner"><b>Product package costs and internal cost rates are owner-only.</b> Workers see the selling baseline for this area above.</div>`}
+  </section>`;
+}
+
 function internalContent(print=false){
   const j=activeJob(),s=state.settings,x=calc();
   const owner=isOwner();
@@ -1106,6 +1223,7 @@ function internalContent(print=false){
     :[['Approved customer total',cash(x.total),cash(x.perSqft)+'/sq ft blended'],['Sq ft',num(x.sqft),j.areas.length+' area(s)'],['Person-hours (ops)',num(x.personHours),'Crew '+x.crew],(authMode()?['Server','ON',x._server?'Verified totals':'Price check pending']:['Cloud','OFF','Not configured'])]
   ).map(([a,b,c])=>`<div class="metric"><span>${a}</span><strong>${b}</strong><small>${c}</small></div>`).join('')}</div>
   ${owner?'':'<div class="info-banner"><b>Worker field plan:</b> operational quantities and checklist only. Expected profit, margin, and discount authority are owner-only (legal/compliance wording — employees do not see those figures in this preview).</div>'}
+  ${baselineSheetHTML(j,s,owner,print)}
 
   <section class="${print?'':'card'}" style="margin-top:16px"><h3>1. Per-area field plan</h3>
   <p class="method-note">Moisture selected on ${moist.items.length} area(s): ${num(moist.sqft)} sq ft → ${cash(moist.total)}. Photos are references only.</p>
