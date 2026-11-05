@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#163d37">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex,nofollow">
+<title>Exotic Splash | Guided Estimator v7 (staff sign-in)</title>
+<meta name="description" content="Exotic Splash staff estimator. Staff sign-in; pricing enforced by the server.">
+<link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="css/auth.css">
+</head>
+<body>
+<div id="gate" class="gate" aria-live="polite"><p class="gate-loading" data-gate-state="loading">Loading…</p></div>
+<div id="appRoot" hidden>
+<div id="modeBanner" class="mode-banner" role="alert" hidden></div>
+<div class="app-shell">
+<aside class="sidebar">
+  <a class="brand" href="#"><span class="brand-mark">es<span>↗</span></span><span>EXOTIC SPLASH<small>GUIDED ESTIMATOR v7</small></span></a>
+  <div class="side-label">WORKSPACE</div>
+  <nav id="nav">
+    <button data-view="guided" class="active">▦ <span>Guided workflow</span></button>
+    <button data-view="jobs">☰ <span>Jobs</span></button>
+    <button data-view="rates">⚙ <span>Costs & pricing</span></button>
+    <button data-view="customer">▤ <span>Customer doc</span></button>
+    <button data-view="guide">📘 <span>Install guide</span></button>
+    <button data-view="subcontractor">▣ <span>Subcontractor</span></button>
+    <button data-view="internal">◷ <span>Internal plan</span></button>
+  </nav>
+  <div class="side-bottom">
+    <span class="status-dot"></span> <span id="saveStatus">Saved locally · Cloud OFF</span>
+    <p id="sideNote">Private workspace<br/>Jobs stay in this browser. Cloud backup is not configured.</p>
+    <div class="cloud-badge off" id="sideCloud" style="margin:10px 0">CLOUD OFF</div>
+    <button class="text-button" id="helpBtn">What information do I need? ↗</button>
+  </div>
+</aside>
+<div class="main-shell">
+  <header class="topbar">
+    <span id="breadcrumb">Guided / Field workflow</span>
+    <div class="top-actions">
+      <button id="backup" class="quiet">↓ Backup</button>
+      <label class="quiet file-label" id="restoreLabel">↑ Restore<input id="restore" type="file" accept="application/json" hidden></label>
+      <button id="newJob" class="quiet">+ New job</button>
+      <button id="signOutTop" class="quiet" type="button" hidden>Sign out</button>
+    </div>
+  </header>
+  <main id="main"></main>
+  <footer class="app-footer">EXOTIC SPLASH EPOXY LLC <span id="footMode">Guided v7 · offline demo · local only</span></footer>
+</div>
+</div>
+</div>
+<div id="printHost"></div>
+<div id="toast" role="status" aria-live="polite"></div>
+<dialog id="helpDialog">
+  <button class="dialog-close" aria-label="Close help">×</button>
+  <span class="eyebrow">BEFORE YOU QUOTE</span>
+  <h2>Walk the job. Capture as you go.</h2>
+  <ol>
+    <li>Customer name, company, phone/email, and full job address (creates the local job).</li>
+    <li>Named floor areas with sq ft and optional photo references (reference only — no auto measure).</li>
+    <li>Slab condition and prep. Moisture-control primer is optional and OFF by default — select deliberately with price visible.</li>
+    <li>System selections: color, flake/solid/metallic/sealer, topcoat, slip-resistant texture.</li>
+    <li>Payment option, property add-in, mileage, crew, and terms.</li>
+    <li>Export customer estimate + install guide, subcontractor, or internal docs. Backup JSON. Cloud stays OFF until approved setup.</li>
+  </ol>
+  <p class="notice">Starting prices are editable planning allowances. Confirm slab, moisture testing needs, and product system before committing. This file does not upload, host links, or message anyone.</p>
+</dialog>
+<!-- Public runtime config (Supabase URL + anon/publishable key ONLY). -->
+<script src="public-config.js"></script>
+<script src="vendor/supabase-js-2.119.0.umd.js" integrity="sha384-uteMfOloLDGt042uDz+xHGF3ym63/WQ6rFq7murQRG8Ih7QrXGEGNtWd8688sb4O"></script>
+<script src="js/epoxy-engine.js"></script>
+<script src="js/quote-core.js"></script>
+<script src="js/es-config.js"></script>
+<script src="js/es-cloud.js"></script>
+<script src="js/guided-app.js"></script>
+<script src="js/es-gate.js"></script>
+</body>
+</html>

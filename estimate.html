@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex,nofollow">
+<title>Your estimate | Exotic Splash Epoxy</title>
+<style>
+body{margin:0;font-family:Arial,Helvetica,sans-serif;background:#f3f5f4;color:#192e2b}
+.wrap{max-width:820px;margin:0 auto;padding:18px}
+.est-card{background:#fff;border:1px solid #d9e1de;border-radius:14px;padding:22px}
+.est-head{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;border-bottom:2px solid #163d37;padding-bottom:12px}
+.est-brand{font-weight:800;font-size:20px;color:#163d37}.est-contact{font-size:12px;color:#55625f}
+.est-title h1{margin:0;font-size:24px}.est-title p{margin:4px 0 0;color:#55625f}
+h2{font-size:15px;margin:20px 0 8px;color:#163d37}
+table{width:100%;border-collapse:collapse}td,th{padding:8px;border-bottom:1px solid #e5ebe9;text-align:left;font-size:14px;vertical-align:top}
+td small{display:block;color:#66736f;font-size:12px}.num{text-align:right;white-space:nowrap}
+.est-totals{margin-top:8px}.est-totals .grand td{font-weight:800;font-size:17px;border-top:2px solid #163d37}
+.est-pending{background:#fff4e0;border:1px solid #e0a040;padding:12px;border-radius:10px;margin:12px 0}
+.est-opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}.opt{border:1px solid #d9e1de;border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:4px}.opt.sel{border-color:#163d37;background:#eef6f3}
+.est-pre{white-space:pre-wrap}.est-note{font-size:13px;color:#55625f}.est-foot{margin-top:22px;font-size:12px;color:#66736f;border-top:1px solid #e5ebe9;padding-top:10px}
+.state{padding:28px;text-align:center;color:#55625f}
+@media print{body{background:#fff}.wrap{padding:0}.est-card{border:0}.noprint{display:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div id="estimate" class="state" aria-live="polite">Loading your estimate…</div>
+  <p class="noprint" style="text-align:center;margin-top:14px"><button id="printBtn" type="button" hidden>Print / save PDF</button></p>
+</div>
+<script src="public-config.js"></script>
+<script src="vendor/supabase-js-2.119.0.umd.js" integrity="sha384-uteMfOloLDGt042uDz+xHGF3ym63/WQ6rFq7murQRG8Ih7QrXGEGNtWd8688sb4O"></script>
+<script src="js/es-config.js"></script>
+<script src="js/es-cloud.js"></script>
+<script src="js/es-estimate-view.js"></script>
+<script>
+(async function(){
+  'use strict';
+  const host=document.getElementById('estimate');
+  const show=(html,st)=>{host.className='';host.innerHTML=html;host.dataset.estimateState=st};
+  const cfg=EsConfig.validate(window.ES_PUBLIC_CONFIG);
+  if(cfg.state!=='ok'){host.textContent='This estimate page is not configured yet. Please contact Exotic Splash for your estimate.';host.dataset.estimateState='unconfigured';return}
+  const token=EsEstimateView.tokenFromHash(location.hash);
+  if(!token){show(EsEstimateView.render(null),'unavailable');return}
+  try{
+    const client=supabase.createClient(cfg.url,cfg.key,{auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false}});
+    const cloud=EsCloud.create(client);
+    const data=await cloud.getSharedEstimate(token);
+    show(EsEstimateView.render(data),data&&data.estimate?'ok':'unavailable');
+    if(data){const b=document.getElementById('printBtn');b.hidden=false;b.onclick=()=>print();}
+  }catch(e){host.textContent='Could not load the estimate right now. Please try again later or contact Exotic Splash.';host.dataset.estimateState='error'}
+})();
+</script>
+</body>
+</html>
