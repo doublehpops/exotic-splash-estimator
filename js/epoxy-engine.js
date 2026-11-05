@@ -8,6 +8,8 @@
 const UNCONFIGURED=null;
 const catalogDefaults={
   garage:{
+    /* Empty default so the staff price-book string survives defaults-only merge. Not a price. */
+    disclaimer:'',
     oneCarStarting:UNCONFIGURED,
     twoCarStarting:UNCONFIGURED,
     threeCarStarting:UNCONFIGURED,
