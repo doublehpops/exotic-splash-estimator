@@ -2,6 +2,6 @@
 window.ES_PUBLIC_CONFIG = {
   "supabaseUrl": "https://xokzebezxkwxzyhahmqr.supabase.co",
   "supabaseAnonKey": "sb_publishable_683y1psYdY6W4if4LcjngQ_uWOCy1tI",
-  "siteUrl": "https://exotic-splash-estimator.netlify.app/index.html",
+  "siteUrl": "https://doublehpops.github.io/exotic-splash-estimator/index.html",
   "allowOfflineDemo": false
 };
