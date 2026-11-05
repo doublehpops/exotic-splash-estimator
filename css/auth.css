@@ -1,0 +1,23 @@
+/* v7 login gate + mode banners */
+.gate{min-height:100vh;display:flex;align-items:flex-start;justify-content:center;padding:6vh 16px;background:var(--bg,#f5f5f0)}
+.gate[hidden]{display:none}
+.gate-card{width:100%;max-width:440px;background:#fff;border:1px solid var(--line,#e0e5df);border-radius:18px;padding:26px;box-shadow:0 10px 30px rgba(22,61,55,.08)}
+.gate-brand{display:flex;gap:12px;align-items:center;margin-bottom:18px}.gate-brand small{display:block;color:var(--muted,#667671);font-size:12px}
+.gate-card h1{font-size:22px;margin:0 0 12px;color:var(--green,#163d37)}
+.gate-form{display:grid;gap:12px;margin:14px 0}.gate-form label{display:grid;gap:6px;font-weight:600;font-size:14px}
+.gate-form input{font:inherit;padding:12px;border:1px solid var(--line,#d8ded8);border-radius:10px;font-size:16px}
+.gate-form .button{width:100%;justify-content:center}
+.gate-error{background:#fbecea;border:1px solid #e3b4ae;color:#7a2620;padding:10px 12px;border-radius:10px;margin:10px 0}
+.gate-ok{background:#eef6e6;border:1px solid #c7dcb0;padding:10px 12px;border-radius:10px;margin:10px 0}
+.gate-small{font-size:12px;color:var(--muted,#667671)}.gate-links{margin:6px 0}
+.gate-steps{padding-left:20px;font-size:14px}.gate-steps li{margin:6px 0}
+.gate-loading{color:var(--muted,#667671)}
+.gate-demo{margin-top:16px;width:100%;padding:12px;border-radius:10px;border:2px dashed #b76a3a;background:#fff7f0;color:#7a3e16;font-weight:700;cursor:pointer}
+.mode-banner{position:sticky;top:0;z-index:50;background:#7a2620;color:#fff;padding:9px 14px;font-size:13px;text-align:center}
+.mode-banner .text-button{color:#fff;text-decoration:underline;margin-left:8px}
+.demo-insecure{color:#a43b35}
+.auth-badge .auth-who{margin:0 6px}.owner-pill{background:#163d37!important;color:#dceb9c!important}
+.cloud-badge.on{background:#e6f1dc;color:#163d37;border-color:#c7dcb0}
+.es-newlink input{width:100%;margin:6px 0;padding:8px;font:inherit}.es-import-row{display:block;margin:6px 0}
+.es-inline{display:inline-flex;gap:6px;align-items:center}
+td small{display:block;color:var(--muted,#667671)}
