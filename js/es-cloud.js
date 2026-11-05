@@ -1,0 +1,98 @@
+/* Exotic Splash v7 — Supabase data adapter (browser + Node tests with a mock client).
+ * Uses ONLY the public anon/publishable key + the signed-in user's JWT. Every
+ * permission decision is made by Postgres RLS / SECURITY DEFINER RPCs or the
+ * quote-job Edge Function — nothing here is trusted for security. */
+(function(root,factory){const api=factory();if(typeof module==='object'&&module.exports)module.exports=api;else root.EsCloud=api})(typeof globalThis!=='undefined'?globalThis:this,function(){
+'use strict';
+const JOB_COLS='id,client_ref,job_number,customer_label,job_data,status,version,created_by,assigned_staff,updated_at,discount_amount';
+class CloudError extends Error{constructor(code,message,cause){super(message);this.code=code;this.cause=cause}}
+function friendly(err){
+  const m=String(err&&(err.message||err.error_description||err)||'');
+  if(/exceeds the owner-approved adjustment limit/i.test(m))return new CloudError('discount_over_cap','Discount exceeds the owner-approved adjustment limit.',err);
+  if(/Only the owner/i.test(m))return new CloudError('forbidden','Only the owner can do that.',err);
+  if(/disabled or not yet approved|row-level security|permission denied|Not allowed/i.test(m))return new CloudError('forbidden','Not allowed for this account (disabled, not approved, or not your job).',err);
+  if(/changed since|version/i.test(m)&&/changed/i.test(m))return new CloudError('conflict','Changed by someone else — reload and retry.',err);
+  if(/Failed to fetch|NetworkError|network/i.test(m))return new CloudError('network','Network unavailable — changes kept on this device; will retry.',err);
+  return new CloudError('error',m||'Request failed',err);
+}
+function unwrap(res){if(res&&res.error)throw friendly(res.error);return res?res.data:null}
+function create(client,opts){
+  opts=opts||{};
+  if(!client||!client.auth)throw new Error('Supabase client required');
+  const api={
+    client,
+    /* ---------- auth (email + password only; NO sign-up anywhere) ---------- */
+    async getSession(){const r=await client.auth.getSession();return unwrap(r)&&r.data.session||null},
+    onAuthChange(cb){const r=client.auth.onAuthStateChange((ev,session)=>cb(ev,session));return r&&r.data&&r.data.subscription},
+    async signIn(email,password){
+      email=String(email||'').trim();if(!email||!password)throw new CloudError('input','Email and password are required.');
+      const r=await client.auth.signInWithPassword({email,password});
+      if(r.error)throw new CloudError('auth','Sign-in failed. Check email and password, or ask the owner whether your account is approved.',r.error);
+      if(!r.data||!r.data.session)throw new CloudError('auth','Sign-in did not return a session.');
+      return r.data.session;
+    },
+    async requestPasswordReset(email,redirectTo){
+      email=String(email||'').trim();if(!email)throw new CloudError('input','Enter your email.');
+      const r=await client.auth.resetPasswordForEmail(email,redirectTo?{redirectTo}:undefined);
+      // Neutral result: never reveal whether the email exists.
+      if(r&&r.error&&/rate|too many/i.test(r.error.message||''))throw new CloudError('rate','Too many requests — wait a minute and try again.',r.error);
+      return true;
+    },
+    async setNewPassword(password){
+      if(!password||String(password).length<10)throw new CloudError('input','Use at least 10 characters.');
+      const r=await client.auth.updateUser({password});if(r.error)throw new CloudError('auth',r.error.message,r.error);return true;
+    },
+    async signOut(){await client.auth.signOut();},
+    /* ---------- profile ---------- */
+    async getProfile(){const d=unwrap(await client.rpc('get_my_profile'));return Array.isArray(d)?(d[0]||null):d},
+    /* ---------- price book ---------- */
+    async loadStaffPriceBook(){return unwrap(await client.from('price_book').select('staff_settings,version,updated_at').eq('id',1).maybeSingle())},
+    async loadOwnerPriceBook(){const d=unwrap(await client.rpc('owner_get_price_book'));return Array.isArray(d)?d[0]:d},
+    async savePriceBook(staff,owner,expectedVersion,reason){
+      if(!String(reason||'').trim())throw new CloudError('input','Enter a reason for the price change (kept in the audit log).');
+      return unwrap(await client.rpc('owner_update_price_book',{p_staff_settings:staff,p_owner_settings:owner,p_expected_version:expectedVersion,p_reason:String(reason).trim()}));
+    },
+    async priceAudit(limit){return unwrap(await client.rpc('owner_price_book_audit',{p_limit:limit||50}))||[]},
+    /* ---------- jobs ---------- */
+    async listJobs(){return unwrap(await client.from('jobs').select(JOB_COLS).neq('status','archived').order('updated_at',{ascending:false}))||[]},
+    async insertJob(clientRef,jobData){return unwrap(await client.from('jobs').insert({client_ref:clientRef,job_data:jobData}).select(JOB_COLS).single())},
+    async updateJob(id,expectedVersion,jobData){
+      const rows=unwrap(await client.from('jobs').update({job_data:jobData}).eq('id',id).eq('version',expectedVersion).select(JOB_COLS));
+      if(!rows||!rows.length)throw new CloudError('conflict','Job was changed elsewhere, or your access changed. Reload jobs before saving again.');
+      return rows[0];
+    },
+    async archiveJob(id){return unwrap(await client.from('jobs').update({status:'archived'}).eq('id',id).select('id'))},
+    async getJobMarkup(id){const d=unwrap(await client.from('job_owner_pricing').select('markup_pct').eq('job_id',id).maybeSingle());return d?Number(d.markup_pct):null},
+    async listJobMarkups(){return unwrap(await client.from('job_owner_pricing').select('job_id,markup_pct'))||[]},
+    async setJobMarkup(id,pct){return unwrap(await client.rpc('owner_set_job_markup',{p_job_id:id,p_markup_pct:pct}))},
+    /* ---------- server-authoritative quote ---------- */
+    async quote(mode,jobId,jobData){
+      const body={mode};if(jobId)body.job_id=jobId;if(mode==='preview')body.job_data=jobData;
+      const r=await client.functions.invoke(opts.quoteFunction||'quote-job',{body});
+      if(r.error){
+        let detail=null;try{detail=r.error.context&&typeof r.error.context.json==='function'?await r.error.context.json():null}catch{}
+        if(detail&&detail.code==='discount_over_cap')throw new CloudError('discount_over_cap','Discount exceeds the owner-approved adjustment limit.');
+        if(detail&&detail.code==='forbidden')throw new CloudError('forbidden','Account is not active staff.');
+        if(detail&&detail.code==='conflict')throw new CloudError('conflict','Job or price book changed — retry.');
+        throw friendly(detail&&detail.error?{message:detail.error}:r.error);
+      }
+      if(!r.data||r.data.ok!==true)throw new CloudError('error',(r.data&&r.data.error)||'Quote failed');
+      return r.data;
+    },
+    /* ---------- customer shares ---------- */
+    async createShare(jobId,days){const d=unwrap(await client.rpc('create_estimate_share',{p_job_id:jobId,p_valid_days:days||30}));return Array.isArray(d)?d[0]:d},
+    async listShares(jobId){return unwrap(await client.rpc('list_estimate_shares',{p_job_id:jobId}))||[]},
+    async revokeShare(shareId){return unwrap(await client.rpc('revoke_estimate_share',{p_share_id:shareId}))},
+    async getSharedEstimate(token){return unwrap(await client.rpc('get_shared_estimate',{p_token:token}))},
+    /* ---------- staff (owner) ---------- */
+    async listStaff(){return unwrap(await client.rpc('owner_list_staff'))||[]},
+    async setStaffAccess(userId,role,active,reason){return unwrap(await client.rpc('owner_set_staff_access',{p_user_id:userId,p_role:role,p_active:active,p_reason:reason||''}))}
+  };
+  return api;
+}
+function shareUrl(base,token){
+  const u=String(base||'').replace(/[#?].*$/,'').replace(/[^/]*$/,'')+'estimate.html';
+  return u+'#t='+encodeURIComponent(token);
+}
+return{create,CloudError,friendly,shareUrl,JOB_COLS};
+});
