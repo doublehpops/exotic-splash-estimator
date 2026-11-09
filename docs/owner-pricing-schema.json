@@ -1,0 +1,184 @@
+{
+  "schema": "exotic-splash.owner-pricing.v1",
+  "live": "owner_settings is {} on price book v4. Do not treat epoxy-engine defaults as saved owner costs.",
+  "books": {
+    "staff_settings": "selling rates, catalog starts and adjustments, approvedAdjustment, business, notes. Employees can read this book.",
+    "owner_settings": "products and costs only. Employees receive zeros, not this object."
+  },
+  "overwrite_rule": "If a live value is a finite number, including 0, do not replace it. Fill only null or missing leaves, and only after review.",
+  "product_record": {
+    "path": "owner_settings.products.<key>",
+    "fields": [
+      "label",
+      "size",
+      "price",
+      "coverage",
+      "unit"
+    ],
+    "price_unit": "USD per package",
+    "keys": [
+      "primer",
+      "base",
+      "white",
+      "metal",
+      "pigment",
+      "sealer",
+      "top",
+      "flake",
+      "level",
+      "levelPrimer",
+      "patch",
+      "grip",
+      "moisture"
+    ]
+  },
+  "cost_record": {
+    "path": "owner_settings.costs.<key>",
+    "keys": [
+      {
+        "key": "waste",
+        "unit": "percent"
+      },
+      {
+        "key": "labor",
+        "unit": "USD per person-hour"
+      },
+      {
+        "key": "prepProduction",
+        "unit": "sq ft per person-hour"
+      },
+      {
+        "key": "coatProduction",
+        "unit": "sq ft per person-hour"
+      },
+      {
+        "key": "levelProduction",
+        "unit": "sq ft per person-hour"
+      },
+      {
+        "key": "removalProduction",
+        "unit": "sq ft per person-hour"
+      },
+      {
+        "key": "patchHours",
+        "unit": "hours"
+      },
+      {
+        "key": "setupHours",
+        "unit": "hours"
+      },
+      {
+        "key": "rentalDay",
+        "unit": "USD per day"
+      },
+      {
+        "key": "tooling",
+        "unit": "USD allowance"
+      },
+      {
+        "key": "supplies",
+        "unit": "USD allowance"
+      },
+      {
+        "key": "dust",
+        "unit": "USD allowance"
+      },
+      {
+        "key": "disposal",
+        "unit": "USD allowance"
+      },
+      {
+        "key": "mile",
+        "unit": "USD per mile"
+      },
+      {
+        "key": "overhead",
+        "unit": "USD per job"
+      },
+      {
+        "key": "contingency",
+        "unit": "percent"
+      },
+      {
+        "key": "purchaseTax",
+        "unit": "percent"
+      },
+      {
+        "key": "markup",
+        "unit": "percent"
+      },
+      {
+        "key": "minimum",
+        "unit": "USD per job"
+      }
+    ]
+  },
+  "material_costbook_item": {
+    "id": "string",
+    "category": "string",
+    "product": "string",
+    "supplier": "string",
+    "unit_size": "string",
+    "verified_unit_cost": "USD owner-only or null",
+    "customer_material_price": "USD materials-only charge or null",
+    "coverage": "string",
+    "consumable_type": "CONSUMABLE|REUSABLE_TOOL|EQUIPMENT|QUOTE_REQUIRED",
+    "quote_required": "boolean",
+    "notes": "string"
+  },
+  "size_mismatches": [
+    {
+      "key": "primer",
+      "engine": "3 gal package",
+      "archive": "1.5 gal kit",
+      "apply": false,
+      "reason": "Package size does not match. Do not copy a unit cost until size, price, and coverage describe the same kit."
+    },
+    {
+      "key": "flake",
+      "engine": "5 lb package",
+      "archive": "40 lb unit",
+      "apply": false,
+      "reason": "Package size does not match."
+    },
+    {
+      "key": "grip",
+      "engine": "pack",
+      "archive": "not identified",
+      "apply": false,
+      "reason": "Traction pack was not matched to a catalog row."
+    },
+    {
+      "key": "base",
+      "engine": "3 gal colored epoxy",
+      "archive": "base kit plus possible pigment",
+      "apply": false,
+      "reason": "Pigment is a separate row. Do not treat one verified kit cost as the full colored system."
+    }
+  ],
+  "garage_adjustment_rule": "Material system changes are (system rate − flake rate) × that package’s own area. A flat delta calibrated to one 450 sq ft reference is rejected. Package area is not stored, so no material delta is seeded. Package starting prices stay as already configured.",
+  "pending_selling_paths": [
+    "catalog.garage.prepAdj.leveling",
+    "catalog.garage.prepAdj.moisture",
+    "catalog.garage.topcoatAdj.premium",
+    "catalog.garage.materialAdj.solid",
+    "catalog.garage.materialAdj.custom",
+    "catalog.garage.materialAdj.sealer",
+    "catalog.garage.materialAdj.metallic",
+    "catalog.garage.conditionAdj.unknown",
+    "catalog.garage.conditionAdj.critical",
+    "catalog.seating.materialAdj.custom",
+    "catalog.seating.materialAdj.sealer",
+    "catalog.seating.conditionAdj.unknown",
+    "catalog.seating.conditionAdj.critical",
+    "catalog.flatwork.materialAdj.custom",
+    "catalog.flatwork.materialAdj.sealer",
+    "catalog.flatwork.conditionAdj.unknown",
+    "catalog.flatwork.conditionAdj.critical",
+    "catalog.flatwork.customStarting"
+  ],
+  "structural_nulls": [
+    "catalog.flatwork.sizeBands.3.maxSqft"
+  ],
+  "sourced_rows_loaded": 0
+}

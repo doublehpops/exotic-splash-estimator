@@ -8,6 +8,7 @@ function fmtDate(s){if(!s)return '';const d=new Date(s);return isNaN(d)?esc(s):d
 function lineRows(lines){return (lines||[]).map(l=>`<tr><td>${esc(l.label)}${l.description?`<small>${esc(l.description)}</small>`:''}</td><td class="num">${l.qty?num(l.qty,2)+' '+esc(l.unit||''):''}</td><td class="num">${l.pending?'Pending':cash(l.total)}</td></tr>`).join('')}
 function render(payload){
   if(!payload||!payload.estimate)return `<section class="est-card"><h1>Estimate not available</h1><p>This link is invalid, expired, or was withdrawn by Exotic Splash. Please contact us for a current estimate.</p></section>`;
+  payload={estimate:payload.estimate,issued_at:payload.issued_at,expires_at:payload.expires_at};
   const e=payload.estimate,b=e.business||{},c=e.customer||{},d=e.document||{},t=e.totals||{},sel=e.selected||{};
   const ready=!!e.quoteReady;
   const docName=d.type==='invoice'?'Invoice':'Estimate';

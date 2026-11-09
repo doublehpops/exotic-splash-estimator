@@ -3,7 +3,7 @@
 const E=window.EpoxyEngine,clone=x=>JSON.parse(JSON.stringify(x));
 const STORAGE_KEY='exotic-splash-estimator-v7';
 const LEGACY_KEYS=['exotic-splash-estimator-v6','exotic-splash-estimator-v5','exotic-splash-estimator-v4','exotic-splash-estimator-v3','exotic-splash-estimator-v2','exotic-splash-estimator-v1'];
-const APP_VERSION=7;
+const APP_VERSION=8;
 /* v7 runtime: 'demo' = offline local preview (NOT SECURE); 'auth' = Supabase-signed-in staff.
  * In auth mode the role comes ONLY from the server profile; prices are enforced by the server. */
 let runtime={mode:'demo'};
@@ -162,6 +162,9 @@ function guidedJob(base){
   j.garageCondition=j.garageCondition||'unknown';
   j.garagePrep=Object.assign({cracks:false,spalling:false,coatingRemoval:false,patching:false,leveling:false,moisture:false},j.garagePrep||{});
   j.catalogItems=Array.isArray(j.catalogItems)?j.catalogItems:[];
+  j.costbook=Object.assign({selections:[],overrides:{},includeCustomerMaterialCharge:false,depositOrPayment:0},j.costbook||{});
+  if(!Array.isArray(j.costbook.selections))j.costbook.selections=[];
+  if(!j.costbook.overrides||typeof j.costbook.overrides!=='object')j.costbook.overrides={};
   // v5/v6: moisture is PER-AREA only. Job-global moistureBarrier / job.moisture do NOT charge.
   // Historical area prep.moisture / a.moisture retained via guidedArea.
   const areaHadMoisture=(j.areas||[]).some(a=>a.moisture||(a.prep&&a.prep.moisture));
@@ -419,7 +422,7 @@ function summaryHTML(){
   <div class="summary-row"><span>Approved adjustment limit</span><strong>${approvedAdjustmentLabel()}</strong></div>
   <button class="button secondary small" data-view="internal">Internal job-cost / travel →</button></div>`;
   const workerMini=`<div class="cost-mini"><span class="eyebrow">FIELD REVIEW · APPROVED PRICES</span>
-  <p class="summary-note" style="margin:0 0 8px">Review scope, schedule and approved payment options. Planned hours and Materials/Labor are <b>selling-price</b> totals (markup included) — not raw cost or margin.</p>
+  <p class="summary-note" style="margin:0 0 8px">Review scope, schedule and approved payment options. Planned hours and the Materials / Labor / Other lines are portions of the approved selling price.</p>
   <div class="summary-row"><span>Planned work hours</span><strong>${num(alloc.personHours,2)} person-hr</strong></div>
   <div class="summary-row"><span>Materials (price)</span><strong>${cash(alloc.materials)}</strong></div>
   <div class="summary-row"><span>Labor (price)</span><strong>${cash(alloc.labor)}</strong></div>
@@ -571,7 +574,7 @@ function flatworkItemsHTML(j){
         ${select('Material / system',base+'.style',[['solid','Solid'],['flake','Flake'],['metallic','Metallic'],['sealer','Clear seal'],['custom','Custom']])}
         ${select('Topcoat',base+'.topcoat',[['protective','Protective'],['none','None'],['premium','Premium']])}
         ${select('Condition',base+'.condition',[['unknown','Unknown / not inspected'],['good','Good'],['fair','Fair'],['poor','Poor'],['critical','Critical']])}
-        ${field('Item starting price override ($)',base+'.customStarting','number','Blank uses size-band price book. Leave blank if unconfigured.','step="any"')}
+        ${field('Item starting price override ($)',base+'.customStarting','number','Optional. Blank keeps the size-band price. A blank override is not a missing package price.','step="any"')}
       </div>
       <p class="method-note">Computed size: <b>${num(Number(sf)||0,2)}</b> sq ft (approx).</p>
       ${textArea('Notes / inspection',base+'.notes')}
@@ -787,7 +790,7 @@ function travelFormulaHTML(x){
   const t=x.travel;const owner=isOwner();
   const crewBit=owner
     ? `${num(t.minutes)} min × 2 × ${num(t.trips)} visit(s) × ${t.crew}-person crew = ${num(t.crewHours,2)} person-hr × ${cash(state.settings.costs.labor)} = <b>${cash(x.sqft?t.crewTravel:0)}</b>`
-    : `${num(t.minutes)} min × 2 × ${num(t.trips)} visit(s) × ${t.crew}-person crew = <b>${num(t.crewHours,2)} person-hr</b> (pay rate owner-only; travel $ folded into quote overhead)`;
+    : `${num(t.minutes)} min × 2 × ${num(t.trips)} visit(s) × ${t.crew}-person crew = <b>${num(t.crewHours,2)} person-hr</b> (dollar rates are not shown on this account; travel is included in the approved quote)`;
   const mileBit=owner
     ? `× ${cash(t.rate)}/mi = <b>${cash(x.sqft?t.mileage:0)}</b> (once, blended into customer total)`
     : `(mileage $ rate owner-only; travel folded into the approved quote)`;
@@ -864,7 +867,7 @@ function quoteAllocationHTML(x, opts={}){
     : `<p class="method-note">No production hours planned yet (add square footage).</p>`;
   return `<div class="quote-alloc ${forCustomer?'doc-alloc':''}">
     <h4>${forCustomer?'Materials, labor & planned hours':'Materials & labor (approved selling prices)'}</h4>
-    <p class="method-note">${escape(q.label)}. Figures below are <b>price totals</b> that include applicable markup and reconcile to the approved quote — not raw supplier cost or hourly pay.</p>
+    <p class="method-note">${forCustomer?'These lines are portions of the approved selling price. They are not a supplier invoice.':escape(q.label)+'. Figures below are selling-price portions of the approved quote.'}</p>
     <div class="metrics">
       <div class="metric"><span>Planned work hours</span><strong>${num(q.personHours,2)}</strong><small>person-hours</small></div>
       <div class="metric"><span>Materials</span><strong>${cash(q.materials)}</strong><small>price total</small></div>
@@ -972,7 +975,7 @@ function stepReview(j){
       <button class="button secondary" data-view="subcontractor">View / print</button>
       <button class="quiet" data-export-html="subcontractor">Download HTML</button></div>
     <div class="export-card"><span class="privacy-tag warn">INTERNAL ONLY</span><h4>${owner?'Internal job-cost':'Field plan (ops)'}</h4><p>${owner?'Materials, labor, prep, travel, overhead, margin/profit (owner-only). Never in customer/sub exports by default.':'Operational field plan, materials, labor, travel, equipment checklist. Profit and margin are owner-only — not shown in worker preview.'}</p>
-      ${owner?checkbox('⚠ Explicitly allow internal figures in a special customer HTML export','job.includeInternalInCustomer'):'<p class="method-note">Internal cost/profit export opt-in is owner-only.</p>'}
+      ${owner?checkbox('⚠ Explicitly allow internal figures in a special customer HTML export','job.includeInternalInCustomer'):'<p class="method-note">Internal-figure export is owner-only.</p>'}
       <button class="button secondary" data-view="internal">${owner?'Open internal':'Open field plan'}</button>
       ${owner?'<button class="quiet" id="costCSV">Export CSV</button>':'<p class="method-note">CSV cost export is owner-only.</p>'}</div>
     <div class="export-card"><span class="privacy-tag">LOCAL</span><h4>Backup & share file</h4><p>Full JSON backup/restore. Web Share when available; otherwise download.</p>
@@ -993,16 +996,84 @@ function guidedView(){
     +wizardRail(j)+`<div class="layout"><div class="stack">${body}${navFooter(j)}</div><aside class="summary" id="liveSummary">${summaryHTML()}</aside></div>`;
 }
 function cField(label,key,help=''){return field(label,'settings.costs.'+key,'number',help)}
+function costbookCatalog(){
+  if(window.EsQuoteCore&&window.EsQuoteCore.getCostbookCatalog){
+    const c=window.EsQuoteCore.getCostbookCatalog();
+    if(c&&c.items&&c.items.length)return c;
+  }
+  return {version:'8.0.0',items:[]};
+}
+function costbookPanelHTML(){
+  const owner=isOwner();
+  const j=activeJob();
+  const CB=window.EsCostbook;
+  if(!CB)return '<div class="info-banner">Material costbook module not loaded.</div>';
+  const cat=costbookCatalog();
+  const resolved=CB.resolveForJob(j,cat);
+  const mats=resolved.materials;
+  const dep=resolved.deposit;
+  const sels=new Map((j.costbook.selections||[]).map(s=>[s.id,s]));
+  const byCat={};
+  for(const it of (cat.items||[])){(byCat[it.category||'Other']=byCat[it.category||'Other']||[]).push(it)}
+  const flagBanner=dep.acceptanceBlocked
+    ?(owner?`<div class="warn-banner" role="alert"><b>ACCEPTANCE BLOCKED</b> — payment/deposit is below internal material cost. Quote cannot be accepted until deposit covers materials.</div>`
+      :`<div class="warn-banner" role="alert"><b>ACCEPTANCE BLOCKED</b> — this quote cannot be accepted yet. The material hold is owner-only.</div>`)
+    :(dep.flag==='WARNING_DEPOSIT_BELOW_CUSTOMER_MATERIAL_CHARGE'
+      ?`<div class="info-banner"><b>Deposit warning</b> — payment is below the customer material charge.</div>`
+      :(dep.flag==='DEPOSIT_COVERS_CUSTOMER_MATERIAL_CHARGE'
+        ?`<div class="info-banner">Deposit covers the customer material charge.</div>`:''));
+  const totals=owner?`<div class="metrics">
+      <div class="metric"><span>Internal material total</span><strong>${cash(mats.internal_material_total)}</strong><small>verified unit costs · owner only</small></div>
+      <div class="metric"><span>Customer material total</span><strong>${cash(mats.customer_material_total)}</strong><small>materials only · not an installed quote</small></div>
+      <div class="metric"><span>Deposit / payment</span><strong>${cash(dep.payment)}</strong><small>${escape(dep.flag||'no material lines')}</small></div>
+    </div>`:`<div class="metrics">
+      <div class="metric"><span>Customer material total</span><strong>${cash(mats.customer_material_total)}</strong><small>materials only · not an installed quote</small></div>
+      <div class="metric"><span>Deposit flag</span><strong>${dep.acceptanceBlocked?'ACCEPTANCE BLOCKED':'Open'}</strong><small>${dep.acceptanceBlocked?'Cannot accept yet':'No owner hold shown'}</small></div>
+    </div><div class="info-banner"><b>Verified unit costs are owner-only.</b> This account sees quantities and customer material charges only.</div>`;
+  const unresolved=mats.quoteRequiredUnresolved||[];
+  const unHTML=unresolved.length?`<div class="warn-banner"><b>QUOTE REQUIRED</b> — ${unresolved.length} item(s) need an owner-verified unit cost before automatic completion.<ul>${unresolved.map(u=>`<li>${escape(u.product||u.id)}</li>`).join('')}</ul></div>`:'';
+  const rows=[];
+  for(const [catName,items] of Object.entries(byCat)){
+    rows.push(`<tr class="group-row"><td colspan="${owner?8:6}"><b>${escape(catName)}</b></td></tr>`);
+    for(const it of items){
+      const sel=sels.get(it.id)||{id:it.id,qty:0,sellAsProduct:false};
+      const qty=Number(sel.qty)||0;
+      const type=it.consumable_type;
+      const ov=j.costbook.overrides[it.id]||{};
+      const cPrice=ov.customer_material_price!=null?ov.customer_material_price:it.customer_material_price;
+      const sellCell=(type==='REUSABLE_TOOL')?`<label class="chk"><input type="checkbox" data-cb-sell="${escape(it.id)}" ${sel.sellAsProduct?'checked':''}/> sell as product</label>`:'';
+      if(owner){
+        const vCost=ov.verified_unit_cost!=null?ov.verified_unit_cost:it.verified_unit_cost;
+        rows.push(`<tr><td>${escape(it.product)}<small>${escape(type)}</small></td><td class="num"><input type="number" min="0" step="1" style="width:4.5rem" data-cb-qty="${escape(it.id)}" value="${qty}"/></td><td>${escape(it.unit_size||'')}</td><td class="num"><input type="number" min="0" step="0.01" style="width:5.5rem" data-cb-vcost="${escape(it.id)}" value="${vCost==null?'':vCost}"/></td><td class="num"><input type="number" min="0" step="0.01" style="width:5.5rem" data-cb-cprice="${escape(it.id)}" value="${cPrice==null?'':cPrice}"/></td><td><input type="text" style="width:7rem" data-cb-cov="${escape(it.id)}" value="${escape(ov.coverage!=null?ov.coverage:(it.coverage||''))}"/></td><td>${sellCell}</td><td class="num">${qty&&vCost!=null?cash(vCost*qty):'—'}</td></tr>`);
+      }else{
+        rows.push(`<tr><td>${escape(it.product)}<small>${escape(type)}</small></td><td class="num"><input type="number" min="0" step="1" style="width:4.5rem" data-cb-qty="${escape(it.id)}" value="${qty}"/></td><td>${escape(it.unit_size||'')}</td><td class="num">${cPrice==null?'—':cash(cPrice)}</td><td class="num">${qty&&cPrice!=null?cash(cPrice*qty):'—'}</td><td>${sellCell}</td></tr>`);
+      }
+    }
+  }
+  const empty=!(cat.items||[]).length?`<p class="method-note">No material catalog is loaded in this unreleased draft. Vendor costs stay out of the public app and are loaded only from the owner Supabase table after the parent deploy. Selecting nothing does not change the installed quote.</p>`:'';
+  const table=rows.length?(owner?tableHTML(['Product','Qty','Unit','Verified $ (owner)','Customer material $','Coverage','Sell?','Internal line'],rows):tableHTML(['Product','Qty','Unit','Customer material $','Line','Sell?'],rows)):'';
+  return `<section class="card" id="costbookPanel" style="margin-top:16px">
+    <h3>Material costbook (v8)</h3>
+    <p class="method-note">CONSUMABLE quantities burn into material totals. REUSABLE_TOOL and EQUIPMENT stay out of job burn unless a tool is explicitly sold. QUOTE REQUIRED blocks automatic completion until the owner enters a verified unit cost. Sales tax and payment fees are excluded until known. This is materials only, not an installed quote.</p>
+    ${flagBanner}${unHTML}${totals}${empty}
+    <div class="fields three" style="margin-top:10px">
+      ${field('Deposit / payment received ($)','job.costbook.depositOrPayment','number','Compared with material totals')}
+      ${owner?`<div class="field"><label class="chk"><input type="checkbox" id="cbIncludeCustMat" ${j.costbook.includeCustomerMaterialCharge?'checked':''}/> Show materials-only charge on the customer estimate</label></div>`:`<div class="field locked"><label>Customer material charge on estimate</label><input disabled value="${j.costbook.includeCustomerMaterialCharge?'Shown (materials only)':'Hidden'}"/></div>`}
+    </div>
+    ${table}
+  </section>`;
+}
 function ratesView(){
   const owner=isOwner();
   return heading('YOUR RATE BOOK','Costs & pricing.','Owner-approved rates. Workers use locked values.','')
   +roleBadgeHTML()
-  +`<div class="rate-banner"><span>◉</span><p><b>${authMode()?(owner?'Owner — edits are a draft until you save the price book to the server.':'Employee — rate book set by the owner (server-enforced).'):(owner?'Owner preview — rates editable in this demo.':'Worker preview — rate book locked.')}</b> ${owner?(authMode()?'Draft changes update estimates on this screen; employees and customer links use the saved server version.':'Changing numbers here updates estimates in this browser only.'):'Workers enter job details and create estimates using approved rates; they cannot change product prices, labor, travel, equipment, or overhead rates. Profit and margin stay owner-only.'}</p></div>
+  +`<div class="rate-banner"><span>◉</span><p><b>${authMode()?(owner?'Owner — edits are a draft until you save the price book to the server.':'Employee — rate book set by the owner (server-enforced).'):(owner?'Owner preview — rates editable in this demo.':'Worker preview — rate book locked.')}</b> ${owner?(authMode()?'Draft changes update estimates on this screen; employees and customer links use the saved server version.':'Changing numbers here updates estimates in this browser only.'):'Workers enter job details and create estimates using approved selling rates. They cannot change prices. Internal cost details are not on this account.'}</p></div>
+  ${(window.EsPriceProposals&&owner)?window.EsPriceProposals.proposalReviewHTML(state.settings,true):''}
   ${authMode()?(runtime.priceBookPanelHTML?runtime.priceBookPanelHTML():''):`<div class="warn-banner"><b>OFFLINE DEMO — NOT SECURE.</b> <b>Preview only — not security.</b> This OWNER/WORKER switch demonstrates UX in a local HTML file. It is <b>not</b> authenticated access control. Real owner-only enforcement requires authenticated deployment with server-side authorization. No sign-in service is configured.</div>`}
   <details open><summary>Customer selling rates ${owner?'':'🔒'}</summary><div class="detail-body"><div class="fields three">${Object.entries({solid:'Solid epoxy / sq ft',flake:'Flake epoxy / sq ft',metallic:'Metallic epoxy / sq ft',sealer:'Clear seal / sq ft',level:'Leveling / sq ft at ¼ inch',removal:'Extra removal / sq ft',patch:'Patch / kit installed',moisture:'Moisture control / sq ft',extraCoat:'Additional solid base coat / sq ft',mediumFlakeExtra:'Medium flake premium / sq ft',fullFlakeExtra:'Full flake premium / sq ft'}).map(([k,v])=>lockedField(v,'settings.rates.'+k,'number')).join('')}</div></div></details>
   <details open><summary>Family pricing options & property add-in ${owner?'':'🔒'}</summary><div class="detail-body"><p>Options never stack. Option rate replaces finish-area rate only.</p>${['opt1','opt2'].map(k=>`<div class="fields three" style="margin-bottom:14px">${lockedField('Option label','settings.pricingOptions.'+k+'.label')}${lockedField('Rate / sq ft ($)','settings.pricingOptions.'+k+'.rate','number')}${state.settings.pricingOptions[k].schedule.map((p,i)=>lockedField('Payment '+(i+1)+' %','settings.pricingOptions.'+k+'.schedule.'+i+'.pct','number')).join('')}</div>`).join('')}
   <div class="fields three">${lockedField('Property add-in label','settings.addOn.label')}${lockedField('Standard add-in / sq ft ($)','settings.addOn.low','number')}${lockedField('Higher add-in / sq ft ($)','settings.addOn.high','number')}</div></div></details>
-  ${authMode()&&!owner?'<div class="info-banner es-costs-hidden"><b>Internal costs are owner-only.</b> Materials, labor, travel, equipment and overhead costs, markup, profit and margin are not sent to employee devices.</div>':`<details><summary>Materials, labor, travel, equipment, overhead ${owner?'':'🔒'}</summary><div class="detail-body"><div class="fields three">${lockedCField('Loaded labor / person-hour ($)','labor')}${lockedCField('Vehicle cost / mile ($)','mile','ONE mileage rate ($0.85). Travel folds into internal overhead.')}${lockedCField('Material waste (%)','waste')}${lockedCField('Business overhead / job ($)','overhead')}${lockedCField('Contingency reserve (%)','contingency')}${lockedCField('Grinder + extractor / day ($)','rentalDay')}${lockedCField('Diamond tooling allowance ($)','tooling')}${lockedCField('Supplies allowance ($)','supplies')}${lockedCField('Dust bags / filters ($)','dust')}${lockedCField('Disposal allowance ($)','disposal')}</div>
+  ${!owner?'<div class="info-banner es-costs-hidden"><b>Internal cost details are not on this account.</b> Package costs and cost rates stay with the owner. This screen shows approved selling rates only.</div>':`<details><summary>Materials, labor, travel, equipment, overhead ${owner?'':'🔒'}</summary><div class="detail-body"><div class="fields three">${lockedCField('Loaded labor / person-hour ($)','labor')}${lockedCField('Vehicle cost / mile ($)','mile','ONE mileage rate ($0.85). Travel folds into internal overhead.')}${lockedCField('Material waste (%)','waste')}${lockedCField('Business overhead / job ($)','overhead')}${lockedCField('Contingency reserve (%)','contingency')}${lockedCField('Grinder + extractor / day ($)','rentalDay')}${lockedCField('Diamond tooling allowance ($)','tooling')}${lockedCField('Supplies allowance ($)','supplies')}${lockedCField('Dust bags / filters ($)','dust')}${lockedCField('Disposal allowance ($)','disposal')}</div>
   <p class="method-note">Product package sizes and coverages are planning allowances. Travel + equipment costs fold into internal overhead; customers never see separate equipment or mileage lines.</p>
   ${Object.entries(state.settings.products).map(([k,p])=>`<div class="product-edit"><div class="product-name">${escape(p.label)} ${owner?'':'🔒'}</div>${lockedField('Package size','settings.products.'+k+'.size','number')}${lockedField('Price / package ($)','settings.products.'+k+'.price','number')}${p.coverage?lockedField('Coverage','settings.products.'+k+'.coverage','number'):'<div class="field"><label>Coverage</label><small>From selection</small></div>'}</div>`).join('')}
   </div></details>`}
@@ -1031,7 +1102,8 @@ function ratesView(){
   :`<div class="fields three">${lockedField('Cap mode','settings.approvedAdjustment.mode')}${lockedField('Maximum amount ($)','settings.approvedAdjustment.amount','number')}${lockedField('Maximum percent (%)','settings.approvedAdjustment.pct','number')}</div>
   <p class="method-note">Current approved adjustment limit: <b>${approvedAdjustmentLabel()}</b> (locked for workers).</p>`}
   </div></details>
-${owner?`<div class="inline-actions" style="margin-top:14px"><button class="button secondary" id="resetRates">${authMode()?'Reset draft to starting allowances':'Reset starting rates'}</button></div>`:`<p class="method-note">Reset rates is owner-only${authMode()?'':' in this preview'}.</p>`}`;
+${owner?`<div class="inline-actions" style="margin-top:14px"><button class="button secondary" id="resetRates">${authMode()?'Reset draft to starting allowances':'Reset starting rates'}</button></div>`:`<p class="method-note">Reset rates is owner-only${authMode()?'':' in this preview'}.</p>`}`
+  +costbookPanelHTML();
 }
 function tableHTML(headers,rows){return `<div class="table-wrap"><table><thead><tr>${headers.map((v,i)=>`<th class="${i?'num':''}">${v}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`}
 function costRows(items){return items.map(x=>`<tr><td>${escape(x.label)}${x.volume!==undefined?`<small>${num(x.volume,2)} ${escape(x.volumeUnit)} purchased · ${num(x.demand,2)} ${escape(x.volumeUnit)} estimated need</small>`:''}</td><td class="num">${num(x.qty,2)} ${escape(x.unit)}</td><td class="num">${cash(x.unitPrice)}</td><td class="num">${cash(x.total)}</td></tr>`)}
@@ -1103,7 +1175,7 @@ function baselineSheetHTML(j,s,owner,print){
     }
   } else if(type==='flatwork'){
     const bandRows=(cat.flatwork.sizeBands||[]).map(b=>`<tr><td>${escape(b.label||b.id)}</td><td class="num">${fmtBaselineMoney(b.starting)}</td></tr>`);
-    bandRows.push(`<tr><td>Custom / override starting</td><td class="num">${fmtBaselineMoney(cat.flatwork.customStarting)}</td></tr>`);
+    bandRows.push(`<tr><td>Custom / override starting</td><td class="num">${E.isConfigured(cat.flatwork.customStarting)?fmtBaselineMoney(cat.flatwork.customStarting):'Optional — blank is not a missing price'}</td></tr>`);
     serviceBlocks+=`<h4 style="margin:12px 0 6px;font-size:13px">Size-band starting prices</h4>`+tableHTML(['Band','Baseline'],bandRows);
     serviceBlocks+=`<h4 style="margin:12px 0 6px;font-size:13px">Material adjustments</h4>`+tableHTML(['Adjustment','Baseline'],baselineAdjRows(cat.flatwork.materialAdj,{solid:'Solid',flake:'Flake',metallic:'Metallic',sealer:'Sealer',custom:'Custom'}));
     serviceBlocks+=`<h4 style="margin:12px 0 6px;font-size:13px">Topcoat adjustments</h4>`+tableHTML(['Adjustment','Baseline'],baselineAdjRows(cat.flatwork.topcoatAdj,{protective:'Protective',none:'None',premium:'Premium'}));
@@ -1146,7 +1218,7 @@ function baselineSheetHTML(j,s,owner,print){
   });
   const sectionClass=print?'baseline-sheet':'card baseline-sheet';
   return `<section class="${sectionClass}" style="margin-top:16px"><h3>0. Current baseline — ${escape(areaLabel)}</h3>
-  <p class="method-note">Live price-book baseline for this business area. Pending = unconfigured (blocks a finalized quote). Selling figures are what staff quotes from; product package costs and internal cost rates are owner-only.</p>
+  <p class="method-note">Live price-book baseline for this business area. Pending = unconfigured (blocks a finalized quote) and is not the same as an explicit $0. Selling figures are what staff quotes from; product package costs and internal cost rates are owner-only. Inactive draft proposals are not included in these figures.</p>
   ${notes}
   <h4 style="margin:12px 0 6px;font-size:13px">Services &amp; catalog (selling)</h4>
   ${serviceBlocks||'<p class="method-note">No service baselines for this area.</p>'}
@@ -1222,7 +1294,7 @@ function internalContent(print=false){
     ?[['Job cost',cash(x.cost),'Direct + overhead + contingency'],['Customer revenue',cash(x.total),cash(x.perSqft)+'/sq ft blended'],['Potential profit',cash(x.profit),'Owner-only · before income tax'],['Margin',num(x.margin)+'%',num(x.personHours)+' person-hr · crew '+x.crew]]
     :[['Approved customer total',cash(x.total),cash(x.perSqft)+'/sq ft blended'],['Sq ft',num(x.sqft),j.areas.length+' area(s)'],['Person-hours (ops)',num(x.personHours),'Crew '+x.crew],(authMode()?['Server','ON',x._server?'Verified totals':'Price check pending']:['Cloud','OFF','Not configured'])]
   ).map(([a,b,c])=>`<div class="metric"><span>${a}</span><strong>${b}</strong><small>${c}</small></div>`).join('')}</div>
-  ${owner?'':'<div class="info-banner"><b>Worker field plan:</b> operational quantities and checklist only. Expected profit, margin, and discount authority are owner-only (legal/compliance wording — employees do not see those figures in this preview).</div>'}
+  ${owner?'':'<div class="info-banner"><b>Worker field plan:</b> operational quantities and checklist only. Purchase prices are not on this account.</div>'}
   ${baselineSheetHTML(j,s,owner,print)}
 
   <section class="${print?'':'card'}" style="margin-top:16px"><h3>1. Per-area field plan</h3>
@@ -1231,9 +1303,10 @@ function internalContent(print=false){
   </section>
 
   <section class="${print?'':'card'}" style="margin-top:16px"><h3>2. Material quantities ${owner?'& cost allowances':' (planning qty — $ owner-only)'}</h3>
+  <p class="method-note">${escape((x.packBilling&&x.packBilling.wording)||'Whole packs are not added on top of an installed price.')}</p>
   ${owner
-    ? tableHTML(['Material','Qty','Unit cost','Total'],costRows(x.material).concat([`<tr class="total-row"><td colspan="3">Materials (raw cost)</td><td class="num">${cash(x.mat)}</td></tr>`]))+(x.tax?`<p class="method-note">Purchase tax on materials: ${cash(x.tax)}</p>`:'')
-    : tableHTML(['Material','Qty (planning)'], (x.material||[]).map(m=>`<tr><td>${escape(m.label)}</td><td class="num">${num(m.qty,2)} ${escape(m.unit)}</td></tr>`))+`<p class="method-note">Supplier package prices are owner-only. See selling-price Materials total in the allocation summary.</p>`}
+    ? tableHTML(['Material','Required','Packs','Billed','Leftover','Owner pack $','Owner total'],(x.material||[]).map(m=>`<tr><td>${escape(m.label)}${m.packStatus==='unresolved'?'<small>Pack size unresolved — not invented</small>':''}</td><td class="num">${m.required==null?'—':num(m.required,2)+' '+(m.volumeUnit||'')}</td><td class="num">${m.packs==null?'—':num(m.packs,0)}</td><td class="num">${m.billedQty==null?'—':num(m.billedQty,2)}</td><td class="num">${m.leftover==null?'—':num(m.leftover,2)}</td><td class="num">${cash(m.unitPrice)}</td><td class="num">${cash(m.total)}</td></tr>`).concat([`<tr class="total-row"><td colspan="6">Materials (raw cost)</td><td class="num">${cash(x.mat)}</td></tr>`]))
+    : tableHTML(['Material','Required','Whole packs','Billed quantity'],(x.material||[]).map(m=>`<tr><td>${escape(m.label)}${m.packStatus==='unresolved'?'<small>Pack size unresolved</small>':''}</td><td class="num">${m.required==null?'—':num(m.required,2)}</td><td class="num">${m.packs==null?'—':num(m.packs,0)}</td><td class="num">${m.billedQty==null?'—':num(m.billedQty,2)}</td></tr>`))+`<p class="method-note">Purchase prices stay with the owner.</p>`}
   </section>
 
   <section class="${print?'':'card'}" style="margin-top:16px"><h3>3. Labor ${owner?'cost breakdown':'planned hours'}</h3>
@@ -1289,7 +1362,7 @@ function internalContent(print=false){
   ${j.notes?`<p><b>Project notes:</b> ${escape(j.notes)}</p>`:''}
   </section>`;
 }
-function internalView(){const owner=isOwner();return heading('PRIVATE',owner?'Internal job-cost & field plan.':'Field plan (ops).',owner?'Per-area plan · materials · labor · travel · equipment · overhead · margin (owner).':'Per-area plan · materials · labor · travel · equipment checklist — profit/margin owner-only.',owner?'<div class="inline-actions"><button class="button secondary" id="costCSV2">↓ CSV</button><button class="button" data-print="internal">Print / save PDF ↗</button></div>':'<div class="inline-actions"><button class="button" data-print="internal">Print / save PDF ↗</button></div>')+roleBadgeHTML()+internalContent()}
+function internalView(){const owner=isOwner();return heading('PRIVATE',owner?'Internal job-cost & field plan.':'Field plan (ops).',owner?'Per-area plan · materials · labor · travel · equipment · overhead · margin (owner).':'Per-area plan, quantities, and checklist. Purchase prices are not on this account.',owner?'<div class="inline-actions"><button class="button secondary" id="costCSV2">↓ CSV</button><button class="button" data-print="internal">Print / save PDF ↗</button></div>':'<div class="inline-actions"><button class="button" data-print="internal">Print / save PDF ↗</button></div>')+roleBadgeHTML()+internalContent()}
 
 function docOptionsHTML(x){
   return `<div class="doc-terms"><h4>Pricing & payment options</h4><p>Alternative options, not combined charges. Property add-in is the same under every option. Travel and equipment stay in internal overhead — not separate customer lines.</p></div>`
@@ -1404,6 +1477,13 @@ function customerGuideDocument(){
   </div>
   </article>`;
 }
+function containerCustomerHTML(x){
+  const note=(x.packBilling&&x.packBilling.wording)||'The installed price already includes materials. Whole packs are not added again.';
+  const lines=x.material||[];
+  if(!lines.length)return `<div class="notice"><b>Containers.</b> ${escape(note)}</div>`;
+  const rows=lines.map(m=>`<tr><td>${escape(m.label)}${m.packStatus==='unresolved'?'<small>Pack size unresolved — not invented</small>':''}</td><td class="num">${m.required==null?'—':num(m.required,2)}</td><td class="num">${m.packs==null?'—':num(m.packs,0)}</td><td class="num">${m.billedQty==null?'—':num(m.billedQty,2)}</td></tr>`);
+  return `<h4>Whole containers</h4><p class="method-note">${escape(note)} Required quantity, whole packs, and billed quantity are separate. No partial pack is charged.</p>${tableHTML(['Product','Required','Whole packs','Billed quantity'],rows)}`;
+}
 function customerDocument(){
   const j=activeJob(),s=state.settings,x=calc(),b=s.business;
   const vis=customerVisibleLines(x);
@@ -1420,6 +1500,7 @@ function customerDocument(){
   <div class="doc-top"><div><div class="doc-brand">${escape(b.name)}</div><div class="doc-contact">${escape(b.address)}<br/>${escape(b.phone)}${b.email?'<br/>'+escape(b.email):''}</div></div><div class="doc-title"><h2>${j.docType==='invoice'?'Invoice':'Estimate'}${x.quoteReady?'':' (pending)'}</h2><p>${escape(j.number)}<br/>${escape(j.date)}</p></div></div>
   <div class="doc-client"><div><span class="doc-caption">Prepared for</span><b>${escape(j.customer||j.company||'Customer to be confirmed')}</b>${j.customer&&j.company?'<br/>'+escape(j.company):''}${j.email?'<br/>'+escape(j.email):''}${j.phone?'<br/>'+escape(j.phone):''}</div><div><span class="doc-caption">Project location</span>${escape(j.address||'Address to be confirmed')}<br/><b>${catalog?(j.projectType+' · '+(j.garagePackage||((j.catalogItems||[]).length+' item(s)'))):(num(x.sqft)+' sq ft total')}</b></div></div>
   ${catalog?catalogBreakdownDocHTML(x):tableHTML(['Work / scope','Quantity','Rate','Amount'],vis.map(a=>`<tr><td><b>${escape(a.label)}</b><small>${escape(a.description)}</small></td><td class="num">${num(a.qty)} ${escape(a.unit)}</td><td class="num">${cash(a.rate)}</td><td class="num">${cash(a.total)}</td></tr>`))}
+  ${j.quoteLocked?'':containerCustomerHTML(x)}
   ${totalBlock}
   ${x.quoteReady?quoteAllocationHTML(x,{customer:true}):''}
   ${(j.showOptions||x.selected.key!=='regular')&&x.sqft&&x.quoteReady?docOptionsHTML(x):''}
@@ -1432,7 +1513,7 @@ function customerDocument(){
   <h4>Schedule & payment</h4>${x.selected.key!=='regular'?`<p><b>${escape(x.selected.label)}</b> — total ${cash(x.total)}:</p><ul>${x.selected.payments.map(p=>`<li>${cash(p.amount)} (${num(p.pct)}%) — ${escape(p.label)}</li>`).join('')}</ul>`:''}<p>${escape(j.terms).replaceAll('\n','<br/>')}</p>
   ${j.notes?'<h4>Project notes</h4><p>'+escape(j.notes).replaceAll('\n','<br/>')+'</p>':''}
   <p>*Blended rate is rounded; the total governs. Slip-resistant texture is not a guarantee against slipping. ${j.docType==='estimate'?'This is an estimate for proposed work, not a receipt.':'This invoice does not represent proof of payment.'}</p>
-  ${j.includeInternalInCustomer?`<div class="warn-banner"><b>WARNING:</b> Internal cost figures were explicitly enabled for this export.<br/>Estimated internal cost ${cash(x.cost)} · potential remainder ${cash(x.profit)} · margin ${num(x.margin)}%.</div>`:''}
+  ${isOwner()&&j.includeInternalInCustomer?`<div class="warn-banner"><b>WARNING:</b> Internal cost figures were explicitly enabled for this owner export.<br/>Estimated internal cost ${cash(x.cost)} · potential remainder ${cash(x.profit)} · margin ${num(x.margin)}%.</div>`:''}
   </div><div class="signature"><div>Customer signature / date</div><div>Contractor signature / date</div></div></article>`;
 }
 function subcontractorDocument(){
@@ -1573,7 +1654,7 @@ async function shareBackup(){
   doBackup();toast('Web Share unavailable — downloaded file instead.');
 }
 function validateBackup(o){
-  if(!o||![1,2,3,4,5,6,7].includes(o.version))throw Error('Use an Exotic Splash estimator backup.');
+  if(!o||![1,2,3,4,5,6,7,8].includes(o.version))throw Error('Use an Exotic Splash estimator backup.');
   if(o.version>=3){if(!Array.isArray(o.jobs))throw Error('Invalid multi-job backup.');if(!o.settings?.products&&o.exportedBy!=='employee')throw Error('Invalid multi-job backup.');}
   else{if(!o.settings?.products||!o.job||!Array.isArray(o.job.areas))throw Error('Invalid legacy backup.');}
 }
@@ -1730,6 +1811,26 @@ document.addEventListener('input',e=>{
   if(t.type==='checkbox'||t.tagName==='SELECT'||path.includes('sqftMode')||path.includes('.prep.')||path.endsWith('.moisture')||path.endsWith('.colorKey')||path.endsWith('.flakeBlend'))render();
 });
 document.addEventListener('change',e=>{
+  const cbEl=e.target;
+  if(cbEl&&cbEl.matches&&cbEl.matches('[data-cb-qty],[data-cb-sell],[data-cb-vcost],[data-cb-cprice],[data-cb-cov],#cbIncludeCustMat')){
+    const j=activeJob();if(!j.costbook)j.costbook={selections:[],overrides:{},includeCustomerMaterialCharge:false,depositOrPayment:0};
+    if(cbEl.id==='cbIncludeCustMat'){if(!isOwner())return;j.costbook.includeCustomerMaterialCharge=!!cbEl.checked;save();render();return}
+    const id=cbEl.getAttribute('data-cb-qty')||cbEl.getAttribute('data-cb-sell')||cbEl.getAttribute('data-cb-vcost')||cbEl.getAttribute('data-cb-cprice')||cbEl.getAttribute('data-cb-cov');
+    if(!id)return;
+    if((cbEl.hasAttribute('data-cb-vcost')||cbEl.hasAttribute('data-cb-cprice')||cbEl.hasAttribute('data-cb-cov'))&&!isOwner()){toast('Verified costs are owner-only.');return}
+    let sel=(j.costbook.selections||[]).find(s=>s.id===id);
+    if(!sel){sel={id,qty:0,sellAsProduct:false};j.costbook.selections.push(sel)}
+    if(cbEl.hasAttribute('data-cb-qty'))sel.qty=Math.max(0,Number(cbEl.value)||0);
+    if(cbEl.hasAttribute('data-cb-sell'))sel.sellAsProduct=!!cbEl.checked;
+    if(isOwner()&&(cbEl.hasAttribute('data-cb-vcost')||cbEl.hasAttribute('data-cb-cprice')||cbEl.hasAttribute('data-cb-cov'))){
+      const ov=j.costbook.overrides[id]=j.costbook.overrides[id]||{};
+      if(cbEl.hasAttribute('data-cb-vcost'))ov.verified_unit_cost=cbEl.value===''?null:Number(cbEl.value);
+      if(cbEl.hasAttribute('data-cb-cprice'))ov.customer_material_price=cbEl.value===''?null:Number(cbEl.value);
+      if(cbEl.hasAttribute('data-cb-cov'))ov.coverage=cbEl.value;
+    }
+    j.costbook.selections=j.costbook.selections.filter(s=>(Number(s.qty)||0)>0||s.sellAsProduct);
+    save();render();return;
+  }
   const t=e.target;
   if(t.matches('[data-add-photo]')){const f=t.files&&t.files[0];readPhotoFile(f,t.dataset.area,t.dataset.bucket);t.value='';return}
   if(t.id==='restore'||t.id==='restoreInline'){

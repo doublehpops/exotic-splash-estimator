@@ -153,7 +153,11 @@ function buildCatalogBreakdown(job,settings){
         pending.push('Starting price needed — enter size/dimensions for '+name+'.');
         startingConfigured=false;
       } else if(!isConfigured(startRaw)){
-        pending.push('Starting price needed — set flatwork starting price'+(band?(' for size band "'+band.label+'"'):'')+' in the price book (or on this item).');
+        if(!band){
+          pending.push('Optional flatwork override is blank and no size band matched for '+name+'. A blank override is not a missing package price. Choose a size band or enter an item override. The item stays Pending.');
+        } else {
+          pending.push('Starting price needed — size band "'+band.label+'" has no configured starting price for '+name+'.');
+        }
         startingConfigured=false;
       } else {
         const start=Number(startRaw);
@@ -195,9 +199,14 @@ function buildCatalogBreakdown(job,settings){
     startingLabel='Seating starting';
   }
 
-  const adjTotal=adjustments.reduce((s,x)=>s+n(x.total),0);
+  const signed=v=>{const x=Number(v);return Number.isFinite(x)?x:0};
+  const adjTotal=adjustments.reduce((s,x)=>s+signed(x.total),0);
   const allLines=[...lines,...adjustments];
   const scopeTotal=startingTotal+adjTotal;
+  /* Do not clamp a non-positive package to $0. Leave the raw scope and block the quote. */
+  if(startingConfigured&&lines.length&&scopeTotal<=0){
+    pending.push('Blocked: start plus adjustments is '+scopeTotal+', which is not a positive selling total. It was not rewritten to $0. A single flat delta sized for one reference area cannot be applied to every package.');
+  }
   const quoteReady=pending.length===0 && startingConfigured && (itemCount>0||type==='garage');
   return {
     type, pending, lines:allLines, startingLines:lines, adjustments, startingTotal, adjTotal, scopeTotal,
@@ -271,7 +280,7 @@ function calculateCatalog(job,settings){
     lines,base:regularBase,regularBase,discountable,discountSqft:0,choices,selected:sel,addOn,travel:tr,travelCost,travelInQuote,crew:tr.crew,
     discount:sel.discount,minimum,subtotal,salesTax,total,profit,margin,perSqft:sqft&&br.quoteReady?total/sqft:0,travelMiles:tr.vehicleMiles,
     personHours:0,balance:Math.max(0,total-n(job.paid)),warnings,
-    quoteReady:br.quoteReady,quoteStatus:br.quoteReady?'ready':'pending_prices',pendingReasons:br.pendingUnique,
+    quoteReady:br.quoteReady,quoteStatus:br.quoteReady?'ready':'pending_prices',pendingReasons:br.pendingUnique,packBilling:{addToInstalledTotal:false,mode:'package_inclusive',wording:'The package or per-item price already includes materials. Whole packs are not added again.'},
     catalog:{
       type:br.type,startingTotal:br.startingTotal,adjTotal:br.adjTotal,scopeTotal:br.scopeTotal,
       startingLabel:br.startingLabel,startingLines:br.startingLines,adjustments:br.adjustments,
@@ -314,7 +323,14 @@ function calculate(job,settings){
  /* v5: job.moisture no longer auto-charges all finished sqft — per-area only. Legacy job.moisture ignored for charging. */
  if(n(job.patchKits)){add('patch',n(job.patchKits));extras.push({label:'Minor patching allowance',description:'Patch kits and application; nonstructural repairs',qty:n(job.patchKits),unit:'kit',rate:n(r.patch),total:n(job.patchKits)*n(r.patch)})}
  const removal=job.condition!=='sound';if(removal&&sqft)extras.push({label:'Additional surface removal',description:job.condition==='adhesive'?'Existing adhesive removal':'Existing paint / coating removal',qty:sqft,unit:'sq ft',rate:n(r.removal),total:sqft*n(r.removal)});
- for(const [key,q]of Object.entries(demand)){const x=p[key],packs=ceil(q/Math.max(.001,n(x.size)));if(packs)material.push({key,label:x.label,qty:packs,unit:(n(x.size)===1?x.unit+' units':n(x.size)+'-'+x.unit+' kits'),unitPrice:n(x.price),total:packs*n(x.price),volume:packs*n(x.size),volumeUnit:x.unit,demand:q})}
+ const PB=(typeof require==='function'?function(){try{return require('./pack-billing.js')}catch(e){return null}}():null)||(typeof EsPackBilling!=='undefined'?EsPackBilling:null);
+ for(const [key,q]of Object.entries(demand)){
+  const x=p[key];
+  const bill=PB?PB.wholePack({required:q,packSize:x.size,requiredUnit:x.unit,packUnit:x.unit}):{status:'ok',required:q,packSize:n(x.size),packs:ceil(q/Math.max(.001,n(x.size))),billedQty:0,leftover:0};
+  if(bill.status==='zero')continue;
+  if(bill.status!=='ok'){material.push({key,label:x.label,qty:null,required:q,packSize:x.size,packs:null,billedQty:null,leftover:null,packStatus:'unresolved',packReason:bill.reason,unit:x.unit||'',unitPrice:n(x.price),total:0,volume:null,volumeUnit:x.unit,demand:q});continue}
+  material.push({key,label:x.label,qty:bill.packs,required:bill.required,packSize:bill.packSize,packs:bill.packs,billedQty:bill.billedQty,leftover:bill.leftover,packStatus:'ok',packReason:bill.reason,unit:(bill.packSize===1?x.unit+' units':bill.packSize+'-'+x.unit+' packs'),unitPrice:n(x.price),total:bill.packs*n(x.price),volume:bill.billedQty,volumeUnit:x.unit,demand:q});
+ }
  const mat=material.reduce((s,x)=>s+x.total,0);const tax=mat*n(c.purchaseTax)/100;
  const hours=[{label:'Grinding / vacuuming',qty:sqft/Math.max(1,n(c.prepProduction))},{label:'Coating application',qty:coatPassArea/Math.max(1,n(c.coatProduction))},{label:'Leveling application',qty:levelArea/Math.max(1,n(c.levelProduction))},{label:'Extra coating / adhesive removal',qty:removal?sqft/Math.max(1,n(c.removalProduction)):0},{label:'Patch application',qty:n(job.patchKits)*n(c.patchHours)},{label:'Setup and cleanup',qty:sqft?n(c.setupHours):0}].filter(x=>x.qty>0).map(x=>({...x,unit:'person-hr',unitPrice:n(c.labor),total:x.qty*n(c.labor)}));
  const labor=hours.reduce((s,x)=>s+x.total,0);const travelMiles=tr.vehicleMiles;
@@ -351,7 +367,9 @@ function calculate(job,settings){
  if(type==='garage'&&garageUsesMeasured(job)){
    warnings.push('Garage >3-car / measured size: using measured sq ft with floor rate book (not a flat 1/2/3-car package).');
  }
- return{sqft,finished,levelArea,levelEquiv,material,mat,tax,hours,labor,equipment,equip,direct,overhead,overheadBase,overheadItems,contingency,cost,lines,base:regularBase,regularBase,discountable,discountSqft,choices,selected:sel,addOn,travel:tr,travelCost,travelInQuote,crew:tr.crew,discount,minimum,subtotal,salesTax,total,profit,margin,perSqft:sqft?total/sqft:0,travelMiles,personHours:hours.reduce((s,x)=>s+x.qty,0),balance:Math.max(0,total-n(job.paid)),warnings,
+ const packPolicy=(typeof EsPackBilling!=='undefined'?EsPackBilling:(typeof require==='function'?function(){try{return require('./pack-billing.js')}catch(e){return null}}():null));
+ const packBilling=packPolicy?packPolicy.chargePolicy(job&&job.costbook&&job.costbook.includeCustomerMaterialCharge?'materials_only':'sqft_inclusive'):{addToInstalledTotal:false,wording:''};
+ return{sqft,finished,levelArea,levelEquiv,material,mat,tax,hours,labor,equipment,equip,direct,overhead,overheadBase,overheadItems,contingency,cost,lines,base:regularBase,regularBase,discountable,discountSqft,choices,selected:sel,addOn,travel:tr,travelCost,travelInQuote,crew:tr.crew,discount,minimum,subtotal,salesTax,total,profit,margin,perSqft:sqft?total/sqft:0,travelMiles,personHours:hours.reduce((s,x)=>s+x.qty,0),balance:Math.max(0,total-n(job.paid)),warnings,packBilling,
    quoteReady:!!sqft,quoteStatus:sqft?'ready':'incomplete',pendingReasons:[],catalog:type==='garage'?{type:'garage',garagePackage:'measured',mode:'measured_sqft'}:null,finalizedBlocked:!sqft};
 }
 function describe(a){const names={solid:'Solid-color epoxy',flake:'Decorative flake epoxy',metallic:'Metallic epoxy',sealer:'Clear sealer + protective topcoat',level:'Self-leveling preparation only'};let s=names[a.style]||names.solid;if(a.style!=='level'){const col=(a.colorKey==='custom'&&a.customColor)?a.customColor:(a.color||'color to be confirmed');s+='; '+col;}if(a.style==='solid')s+='; '+Math.max(1,n(a.coats))+' base coat(s)';if(a.style==='flake'){s+='; '+(a.flake==='full'?'full broadcast':a.flake==='medium'?'medium broadcast':'light spot flakes');const fb=(a.flakeBlend==='custom'&&a.customFlakeBlend)?a.customFlakeBlend:(a.flakeBlendLabel||a.flakeBlend||'');if(fb)s+=', flake blend: '+fb;}if(a.grip&&a.style!=='level')s+='; slip-resistant texture';if(a.style==='level'||a.level)s+='; leveling '+n(a.depth)+' inch average';if(a.moisture||(a.prep&&a.prep.moisture))s+='; moisture-control primer/barrier on this area';return s;}

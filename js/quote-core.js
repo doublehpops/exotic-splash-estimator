@@ -11,10 +11,20 @@
   root.EsQuoteCore=api;
 })(typeof globalThis!=='undefined'?globalThis:this,function(){
 'use strict';
-const CORE_VERSION='7.0.0';
+const CORE_VERSION='8.0.0';
 const clone=x=>JSON.parse(JSON.stringify(x));
 const STAFF_SECTIONS=['business','rates','pricingOptions','addOn','approvedAdjustment','catalog','notes'];
 const OWNER_SECTIONS=['products','costs'];
+/* v8 material costbook. Empty catalog = no change for jobs that have no selections. */
+let _costbookCatalog=null;
+function setCostbookCatalog(cat){_costbookCatalog=cat||null}
+function getCostbookCatalog(){return _costbookCatalog}
+function costbookApi(){return (typeof globalThis!=='undefined'&&globalThis.EsCostbook)||(typeof require==='function'?function(){try{return require('./es-costbook.js')}catch(e){return null}}():null)}
+function resolveCostbook(job){
+  const CB=costbookApi();
+  if(!CB||!getCostbookCatalog())return null;
+  return CB.resolveForJob(job||{},getCostbookCatalog());
+}
 
 /* identical semantics to guided-app.js merge(): only keys present in defaults are taken */
 function merge(target,source){for(const k of Object.keys(target)){if(source&&Object.prototype.hasOwnProperty.call(source,k)){if(target[k]&&typeof target[k]==='object'&&!Array.isArray(target[k])&&source[k]&&typeof source[k]==='object'&&!Array.isArray(source[k]))merge(target[k],source[k]);else target[k]=source[k]}}return target}
@@ -96,6 +106,11 @@ function applyEmployeeLocks(job,stored){
   job.includeInternalInCustomer=false;
   const byId={};for(const a of (s.areas||[]))if(a&&a.id)byId[a.id]=a;
   for(const a of job.areas||[]){const o=byId[a.id];a.rate=o&&o.rate!==undefined?o.rate:null}
+  if(job.costbook){
+    const storedCb=s.costbook||{};
+    job.costbook.overrides=clone(storedCb.overrides||{});
+    job.costbook.includeCustomerMaterialCharge=!!storedCb.includeCustomerMaterialCharge;
+  }
   return job;
 }
 
@@ -164,17 +179,58 @@ function staffSnapshot(E,job,x,settings){
     quoteReady:!!x.quoteReady,quoteStatus:x.quoteStatus||'',pendingReasons:clone(x.pendingReasons||[]),
     catalog:cat,
     allocation:quoteAllocation(x),
-    cap,capBase:r2(capBase(x)),capMode:approvedAdjustment(settings).mode
+    cap,capBase:r2(capBase(x)),capMode:approvedAdjustment(settings).mode,
+    costbook:null,acceptanceBlocked:false,acceptanceBlockCodes:[]
   };
 }
+function attachCostbookToStaff(staff,job){
+  const CB=costbookApi();
+  const resolved=resolveCostbook(job);
+  if(!CB||!resolved)return staff;
+  staff.costbook=CB.staffMaterialSnapshot(resolved.materials,resolved.deposit);
+  staff.acceptanceBlocked=!!resolved.acceptanceBlocked;
+  staff.acceptanceBlockCodes=resolved.acceptanceBlocked?(resolved.deposit.codes||[]):[];
+  if(resolved.quoteBlockedByCostbook){
+    staff.quoteReady=false;staff.finalizedBlocked=true;
+    staff.quoteStatus=staff.quoteStatus&&staff.quoteStatus!=='ready'?staff.quoteStatus:'pending_costbook';
+    const reason='Material costbook: QUOTE REQUIRED item needs an owner-verified unit cost before automatic quote completion';
+    staff.pendingReasons=Array.isArray(staff.pendingReasons)?staff.pendingReasons.concat([reason]):[reason];
+  }
+  if(resolved.acceptanceBlocked){
+    staff.finalizedBlocked=true;staff.quoteReady=false;
+    const reason='ACCEPTANCE_BLOCK: deposit or payment is below the owner material hold';
+    staff.pendingReasons=Array.isArray(staff.pendingReasons)?staff.pendingReasons.concat([reason]):[reason];
+  }
+  return staff;
+}
+function staffSnapshotSafe(E,job,x,settings){return scrubSensitive(attachCostbookToStaff(staffSnapshot(E,job,x,settings),job))}
 /** Owner-only internal figures. */
-function internalSnapshot(x,markupPct){
-  return{cost:n(x.cost),profit:n(x.profit),margin:n(x.margin),mat:n(x.mat),tax:n(x.tax),labor:n(x.labor),equip:n(x.equip),
+function internalSnapshot(x,markupPct,job){
+  const base={cost:n(x.cost),profit:n(x.profit),margin:n(x.margin),mat:n(x.mat),tax:n(x.tax),labor:n(x.labor),equip:n(x.equip),
     direct:n(x.direct),overhead:n(x.overhead),overheadBase:n(x.overheadBase),contingency:n(x.contingency),
     travelCost:n(x.travelCost),travelInQuote:n(x.travelInQuote),markupPct:markupPct==null?null:n(markupPct)};
+  const CB=costbookApi();
+  const resolved=resolveCostbook(job);
+  if(CB&&resolved){
+    base.costbook=CB.ownerMaterialSnapshot(resolved.materials,resolved.deposit);
+    base.internal_material_total=resolved.materials.internal_material_total;
+  }
+  return base;
 }
 function isCatalogJob(E,j){const t=E.projectTypeOf(j);return t==='flatwork'||t==='seating'||(t==='garage'&&!E.garageUsesMeasured(j))}
 /** Whitelisted customer document data (DB re-whitelists via private.customer_safe_snapshot). */
+const SENSITIVE_KEY=/^(cost|profit|margin|markup|markupPct|provenance|proposal|proposals|internal|wage|payRate|hourlyPay|ownerSettings|owner_settings|staff_settings|products|verified_unit_cost|internal_material_total|internal_line_total)$/;
+/** Drop owner-only keys from anything that can reach an employee or customer. */
+function scrubSensitive(value){
+  if(Array.isArray(value))return value.map(scrubSensitive);
+  if(!value||typeof value!=='object')return value;
+  const out={};
+  for(const k of Object.keys(value)){
+    if(SENSITIVE_KEY.test(k))continue;
+    out[k]=scrubSensitive(value[k]);
+  }
+  return out;
+}
 function customerSnapshot(E,job,x,settings){
   const b=settings.business||{};const catalog=isCatalogJob(E,job);
   const sel=x.selected||{};
@@ -203,9 +259,20 @@ function customerSnapshot(E,job,x,settings){
     addOn:x.addOn&&x.addOn.included?{included:true,label:x.addOn.label||'',rate:n(x.addOn.rate)}:{included:false},
     allocation:(()=>{const q=quoteAllocation(x);return{materials:q.materials,labor:q.labor,other:q.other,subtotal:q.subtotal,salesTax:q.salesTax,total:q.total}})(),
     quoteReady:!!x.quoteReady,quoteStatus:x.quoteStatus||'',pendingReasons:(x.pendingReasons||[]).map(String),
-    priceNotes:settings.notes||'',terms:job.terms||'',jobNotes:job.notes||''
+    priceNotes:settings.notes||'',terms:job.terms||'',jobNotes:job.notes||'',
+    materialCharge:null,acceptanceBlocked:false
   };
 }
+function attachCostbookToCustomer(cust,job){
+  const CB=costbookApi();
+  const resolved=resolveCostbook(job);
+  if(!CB||!resolved)return cust;
+  cust.materialCharge=CB.customerMaterialSnapshot(resolved.materials,{includeCustomerMaterialCharge:resolved.includeCustomerMaterialCharge});
+  cust.acceptanceBlocked=!!resolved.acceptanceBlocked;
+  if(resolved.quoteBlockedByCostbook||resolved.acceptanceBlocked)cust.quoteReady=false;
+  return cust;
+}
+function customerSnapshotSafe(E,job,x,settings){return scrubSensitive(attachCostbookToCustomer(customerSnapshot(E,job,x,settings),job))}
 /** Pure server computation. */
 function computeQuote(E,{jobData,staffSettings,ownerSettings,markupPct}){
   const settings=buildSettings(E,staffSettings,ownerSettings);
@@ -246,20 +313,28 @@ async function handleQuoteRequest(body,deps,E){
     const pb=await deps.getPriceBook();
     const markup=stored?await deps.getJobMarkup(stored.id):null;
     const {settings,job,x}=computeQuote(E,{jobData,staffSettings:pb.staff_settings,ownerSettings:pb.owner_settings,markupPct:markup});
-    const staff=staffSnapshot(E,job,x,settings);
+    const staff=staffSnapshotSafe(E,job,x,settings);
     const out={ok:true,mode,role:profile.role,coreVersion:CORE_VERSION,priceBookVersion:pb.version,jobVersion:stored?stored.version:null,staff};
     if(mode==='preview'&&!owner&&n(job.discount)>staff.cap+0.005&&(job.priceOption||'regular')==='regular')
       out.discountOverCap=true;
+    if(staff.acceptanceBlocked){
+      out.acceptanceBlocked=true;
+      out.acceptanceBlockCodes=staff.acceptanceBlockCodes||['ACCEPTANCE_BLOCK'];
+    }
     if(mode==='record'){
-      const customer=customerSnapshot(E,job,x,settings);
-      const internal=internalSnapshot(x,job.markup);
+      if(staff.acceptanceBlocked){
+        return{status:422,body:{ok:false,code:'ACCEPTANCE_BLOCK',codes:staff.acceptanceBlockCodes||['ACCEPTANCE_BLOCK'],error:'Deposit or payment does not cover the required material hold',staff}};
+      }
+      const customer=customerSnapshotSafe(E,job,x,settings);
+      const internal=internalSnapshot(x,job.markup,job);
       const quoteId=await deps.recordQuote({
         p_job_id:stored.id,p_job_version:stored.version,p_requested_by:profile.id,p_engine_version:CORE_VERSION,
-        p_price_book_version:pb.version,p_quote_ready:!!x.quoteReady,p_quote_status:x.quoteStatus||'',
+        p_price_book_version:pb.version,p_quote_ready:!!staff.quoteReady,p_quote_status:staff.quoteStatus||x.quoteStatus||'',
         p_total:r2(x.total),p_cap_base:r2(capBase(x)),p_customer_snapshot:customer,p_staff_snapshot:staff,p_internal:internal});
       out.quoteId=quoteId;out.customer=customer;
     }
-    if(owner)out.internal=internalSnapshot(x,job.markup);
+    if(owner)out.internal=internalSnapshot(x,job.markup,job);
+    else delete out.internal;
     return{status:200,body:out};
   }catch(e){
     if(e instanceof HttpError)return{status:e.status,body:{ok:false,code:e.code,error:e.message}};
@@ -273,5 +348,6 @@ async function handleQuoteRequest(body,deps,E){
 
 return{CORE_VERSION,STAFF_SECTIONS,OWNER_SECTIONS,merge,deepMergeSettings,splitSettings,buildSettings,redactedStaffSettings,
   prepareJob,jobForTransport,applyEmployeeLocks,computeAreaSqft,approvedAdjustment,approvedAdjustmentCap,capBase,
-  customerVisibleLines,quoteAllocation,staffWarnings,staffSnapshot,internalSnapshot,customerSnapshot,computeQuote,handleQuoteRequest,HttpError};
+  customerVisibleLines,quoteAllocation,staffWarnings,staffSnapshot,staffSnapshotSafe,internalSnapshot,customerSnapshot,customerSnapshotSafe,scrubSensitive,computeQuote,handleQuoteRequest,HttpError,
+  setCostbookCatalog,getCostbookCatalog,resolveCostbook,attachCostbookToStaff,attachCostbookToCustomer};
 });
