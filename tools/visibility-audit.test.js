@@ -104,7 +104,7 @@ check('review html is owner-only and does not invent averages',()=>{
   assert.ok(html.includes('>8<'));
   assert.ok(html.includes('>10<'));
   assert.ok(html.includes('>15<'));
-  assert.strictEqual(html.includes('Provisional fills are not loaded'),true);
+  assert.strictEqual(html.includes('does not load vendor costs'),true);
   assert.strictEqual(html.includes(String(E.defaults.costs.labor)),false);
 });
 
@@ -141,9 +141,9 @@ check('customer and staff snapshots drop sensitive keys',()=>{
 function garageSettings(extra){
   const s=JSON.parse(JSON.stringify(E.defaults));
   s.rates.solid=8;s.rates.flake=10;s.rates.metallic=15;s.rates.sealer=3;
-  s.catalog.garage.oneCarStarting=1900;
-  s.catalog.garage.twoCarStarting=3150;
-  s.catalog.garage.threeCarStarting=4900;
+  s.catalog.garage.oneCarStarting=1000;
+  s.catalog.garage.twoCarStarting=2000;
+  s.catalog.garage.threeCarStarting=3000;
   const zero={solid:0,flake:0,metallic:0,sealer:0,custom:0};
   s.catalog.garage.materialAdj=Object.assign({},zero);
   s.catalog.garage.topcoatAdj={protective:0,none:0,premium:0};
@@ -164,8 +164,8 @@ function garageJob(pkg,style,prep){
 }
 check('garage packages stay positive and a shared 450 sf flat is not applied',()=>{
   const safe=garageSettings();
-  for(const [pkg,start] of [['1car',1900],['2car',3150],['3car',4900]]){
-    for(const style of ['solid','flake','metallic','sealer']){
+  for(const [pkg,start] of [['1car',1000],['2car',2000],['3car',3000]]){
+    for(const style of ['solid','flake','metallic']){
       const x=E.calculate(garageJob(pkg,style),safe);
       assert.strictEqual(x.quoteReady,true,pkg+' '+style);
       assert.strictEqual(x.catalog.scopeTotal,start);
@@ -177,19 +177,33 @@ check('garage packages stay positive and a shared 450 sf flat is not applied',()
   unsafe.catalog.garage.materialAdj.solid=-900;
   const one=E.calculate(garageJob('1car','sealer'),unsafe);
   assert.strictEqual(one.quoteReady,false);
-  assert.strictEqual(one.catalog.scopeTotal,1900-3150);
-  assert.ok(one.catalog.scopeTotal<0);
+  assert.strictEqual(one.catalog.scopeTotal,1000);
   assert.strictEqual(one.finalizedBlocked,true);
-  assert.ok(one.pendingReasons.some(r=>/not a positive selling total/.test(r)));
+  assert.ok(one.pendingReasons.some(r=>/not a supported garage-package preset/.test(r)));
   assert.strictEqual(one.total,0);
   const two=E.calculate(garageJob('2car','sealer'),unsafe);
-  assert.strictEqual(two.catalog.scopeTotal,0);
+  assert.strictEqual(two.catalog.scopeTotal,2000);
   assert.strictEqual(two.quoteReady,false);
+  assert.strictEqual(two.total,0);
   const three=E.calculate(garageJob('3car','solid'),unsafe);
-  assert.strictEqual(three.catalog.scopeTotal,4900-900);
+  assert.strictEqual(three.catalog.scopeTotal,3000-900);
   assert.strictEqual(three.quoteReady,true);
   assert.strictEqual(P.SOURCED_ESTIMATES.length,0);
   assert.strictEqual(E.defaults.catalog.garage.materialAdj.sealer,null);
+});
+
+check('flake yield factors stay at the current flagged values',()=>{
+  const s=JSON.parse(JSON.stringify(E.defaults));
+  s.costs.waste=0; s.products.flake.size=1; s.products.flake.price=1; s.products.flake.unit='lb';
+  function demand(flake){
+    const j=E.newJob(); j.customer='Synthetic'; j.tax=0; j.addOnIncluded=false; j.miles=0; j.projectType='floor'; j.condition='sound';
+    j.areas[0].sqft=flake==='full'?7:flake==='medium'?125:250; j.areas[0].style='flake'; j.areas[0].flake=flake; j.areas[0].color='Gray';
+    const row=E.calculate(j,s).material.find(m=>m.key==='flake');
+    return row&&row.required;
+  }
+  assert.strictEqual(demand('full'),1);
+  assert.strictEqual(demand('medium'),1);
+  assert.strictEqual(demand('light'),1);
 });
 
 check('optional flatwork override blank is not called a missing package price',()=>{

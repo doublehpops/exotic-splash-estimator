@@ -91,23 +91,22 @@ sellingCase('S08','garage-3car-chicago-flake','Chicago, IL',garageJob('3car','fl
   const s=settings(); s.catalog.garage.materialAdj.sealer=-1500;
   const j=garageJob('1car','sealer','good','Chicago, IL');
   const x=E.calculate(j,s);
-  const scope=1000+(-1500);
-  add({id:'S09',name:'garage-1car-unsafe-negative-delta',layer:'engine-local',locale:'Chicago, IL',priceSource:'synthetic start 1000 and synthetic flat -1500; not a sourced average',
-    expectedScope:scope,actualScope:x.catalog.scopeTotal,expectedTotal:0,actualTotal:x.total,quoteReady:x.quoteReady,finalizedBlocked:x.finalizedBlocked,
+  add({id:'S09',name:'garage-sealer-preset-rejected',layer:'engine-local',locale:'Chicago, IL',priceSource:'synthetic flat -1500 is present and must not be applied',
+    expectedScope:1000,actualScope:x.catalog.scopeTotal,expectedTotal:0,actualTotal:x.total,quoteReady:x.quoteReady,finalizedBlocked:x.finalizedBlocked,
     disclaimerApplies:true,garageFeature:'1car',zeroClass:'blocked-or-incomplete-zero',
-    pass:x.catalog.scopeTotal===scope&&x.quoteReady===false&&x.finalizedBlocked===true&&x.total===0&&x.catalog.scopeTotal<0,
-    reason:x.catalog.scopeTotal===scope?'blocked non-positive scope, not rewritten to a free quote':'scope was clamped or mis-added',
+    pass:x.catalog.scopeTotal===1000&&x.quoteReady===false&&x.total===0&&(x.pendingReasons||[]).some(r=>/not a supported garage-package preset/.test(r)),
+    reason:'Sealer package preset is blocked. The negative flat is not applied and the quote is not finalized at $0.',
     visibility:'engine only'});
 })();
 (function(){
   const s=settings(); s.catalog.garage.materialAdj.sealer=-2000;
   const j=garageJob('2car','sealer','good','Chicago, IL');
   const x=E.calculate(j,s);
-  add({id:'S10',name:'garage-2car-unsafe-zero-scope',layer:'engine-local',locale:'Chicago, IL',priceSource:'synthetic start 2000 and flat -2000',
-    expectedScope:0,actualScope:x.catalog.scopeTotal,actualTotal:x.total,quoteReady:x.quoteReady,
+  add({id:'S10',name:'garage-2car-sealer-would-zero',layer:'engine-local',locale:'Chicago, IL',priceSource:'synthetic start 2000 and flat -2000, which would zero the package if applied',
+    expectedScope:2000,actualScope:x.catalog.scopeTotal,actualTotal:x.total,quoteReady:x.quoteReady,
     disclaimerApplies:true,garageFeature:'2car',zeroClass:'blocked-or-incomplete-zero',
-    pass:x.catalog.scopeTotal===0&&x.quoteReady===false&&x.total===0,
-    reason:'zero scope stays blocked, not a finalized free quote',visibility:'engine only'});
+    pass:x.catalog.scopeTotal===2000&&x.quoteReady===false&&x.total===0,
+    reason:'A flat that would make the 2-car package $0 is not applied. Use measured sq ft at the sealer selling rate.',visibility:'engine only'});
 })();
 sellingCase('S11','garage-1car-unknown-condition','Chicago, IL',garageJob('1car','flake','unknown','Chicago, IL'),{total:0,ready:false},{disclaimerApplies:true,zeroClass:'blocked-or-incomplete-zero'});
 
@@ -211,7 +210,8 @@ packCase('S23','pack-unit-mismatch',2,3,{opts:{requiredUnit:'gal',packUnit:'lb'}
   const headers=['id','name','layer','locale','pass','quoteReady','expectedTotal','actualTotal','expectedPacks','actualPacks','expectedBilled','actualBilled','zeroClass','garageFeature','disclaimerApplies','reason'];
   const csv=[headers.join(',')].concat(rows.map(r=>headers.map(h=>{const v=r[h]==null?'':String(r[h]);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v}).join(',')));
   fs.writeFileSync(path.join(dir,'scenario-25-results.csv'),csv.join('\n')+'\n');
-  const md=['# 25-scenario review','','Local engine and quote-core mock only. Not live access control and not a routed drive.','',
+  const md=['# 25-scenario review','','Local engine and quote-core mock only. Not live access control and not a routed drive. The private evidence set is not loaded. These 25 rows do not mean every price is resolved or live.','',
+    'Unresolved on purpose: garage sealer as a package preset, custom and critical scopes, package leveling, and a blank flatwork override. Unknown condition stays blocked pending inspection. Installer 250/450/650 sq ft figures are not Double package sizes and are not used. Required quantity, whole packs, and pack price are separate from source proof.','',
     'Pass '+counts.pass+' / fail '+counts.fail+' / rows with a blocked or incomplete zero '+counts.blocked+'.','',
     '| ID | Name | Locale | Result | Actual total | Note |','| --- | --- | --- | --- | --- | --- |'];
   for(const r of rows)md.push('| '+r.id+' | '+r.name+' | '+r.locale+' | '+(r.pass?'pass':'FAIL')+' | '+(r.actualTotal==null?'—':r.actualTotal)+' | '+String(r.reason||'').replace(/\|/g,'/')+' |');

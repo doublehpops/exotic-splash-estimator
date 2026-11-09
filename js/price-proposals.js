@@ -222,7 +222,7 @@ function proposalReviewHTML(settings,owner){
   const model=reviewModel(settings);
   const rows=model.ownerConfirmed.map(r=>`<tr><td>${esc(r.label)}<small>${esc(r.path)}</small></td><td>${esc(r.unit)}</td><td class="num">${esc(String(r.confirmedLive))}</td><td>Already on the live book. Not a new estimate.</td></tr>`).join('');
   return `<details open class="proposal-review"><summary>Draft review — inactive price proposals</summary><div class="detail-body">
-  <div class="warn-banner"><b>Not on customer quotes.</b> Price book v4 already has solid $8, flake $10, and metallic $15 per sq ft. This screen does not write them again. ${model.awaitingSourced} catalog prices are still null. Provisional fills are not loaded (${model.sourcedEstimateCount} sourced rows).</div>
+  <div class="warn-banner"><b>Not on customer quotes.</b> Solid $8, flake $10, and metallic $15 per sq ft stay as approved selling rates. This draft does not adopt a solid-vs-flake policy, does not seed installer 250/450/650 sq ft guesses, and does not load vendor costs. ${model.awaitingSourced} catalog prices remain unresolved. Sourced rows loaded: ${model.sourcedEstimateCount}.</div>
   <p class="method-note">${model.configuredZero} fields on the code book are an explicit zero, which is different from Pending. Configured live values are preserved. Owner product costs and cost rates are not in the database yet; employees still receive zeros.</p>
   <table><thead><tr><th>Floor selling rate</th><th>Unit</th><th class="num">Live</th><th>Review</th></tr></thead><tbody>${rows}</tbody></table>
   <p class="method-note">${esc(LIVE_CONFIRMED_PROVENANCE)}</p>

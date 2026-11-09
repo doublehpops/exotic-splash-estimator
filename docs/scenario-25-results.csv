@@ -7,14 +7,14 @@ S05,floor-chicago-zero-sqft,engine-local,"Chicago, IL",true,false,0,0,,,,,blocke
 S06,garage-1car-chicago-flake,engine-local,"Chicago, IL",true,true,1000,1000,,,,,nonzero,1car,true,
 S07,garage-2car-milwaukee-flake,engine-local,"Milwaukee, WI",true,true,2000,2000,,,,,nonzero,2car,true,
 S08,garage-3car-chicago-flake,engine-local,"Chicago, IL",true,true,3000,3000,,,,,nonzero,3car,true,
-S09,garage-1car-unsafe-negative-delta,engine-local,"Chicago, IL",true,false,0,0,,,,,blocked-or-incomplete-zero,1car,true,"blocked non-positive scope, not rewritten to a free quote"
-S10,garage-2car-unsafe-zero-scope,engine-local,"Chicago, IL",true,false,,0,,,,,blocked-or-incomplete-zero,2car,true,"zero scope stays blocked, not a finalized free quote"
+S09,garage-sealer-preset-rejected,engine-local,"Chicago, IL",true,false,0,0,,,,,blocked-or-incomplete-zero,1car,true,Sealer package preset is blocked. The negative flat is not applied and the quote is not finalized at $0.
+S10,garage-2car-sealer-would-zero,engine-local,"Chicago, IL",true,false,,0,,,,,blocked-or-incomplete-zero,2car,true,A flat that would make the 2-car package $0 is not applied. Use measured sq ft at the sealer selling rate.
 S11,garage-1car-unknown-condition,engine-local,"Chicago, IL",true,false,0,0,,,,,blocked-or-incomplete-zero,1car,true,
 S12,garage-measured-200-flake,engine-local,"Naperville, IL",true,true,2000,2000,,,,,nonzero,measured,false,
 S13,flatwork-small-chicago,engine-local,"Chicago, IL",true,true,400,400,,,,,nonzero,not-applicable,false,"size-band start, blank override ignored"
 S14,flatwork-blank-override-austin,engine-local,"Austin, TX",true,false,0,0,,,,,blocked-or-incomplete-zero,not-applicable,false,Optional flatwork override is blank and no size band matched for Odd. A blank override is not a missing package price. Choose a size band or enter an item override. The item stays 
 S15,seating-two-chairs-chicago,engine-local,"Chicago, IL",true,true,360,360,,,,,nonzero,not-applicable,false,2 × 180
-S16,seating-unknown-denver,engine-local,"Denver, CO",true,false,0,0,,,,,blocked-or-incomplete-zero,not-applicable,false,Condition is Unknown for Stool — do not assume $0. Inspect or configure an explicit adjustment.
+S16,seating-unknown-denver,engine-local,"Denver, CO",true,false,0,0,,,,,blocked-or-incomplete-zero,not-applicable,false,Condition is Unknown for Stool. A fair adjustment is not applied. Inspection is required before this item can be finalized.
 S17,pack-zero-usage,pack-billing-local,not a priced city,true,false,,,0,0,0,0,zero-packs-not-a-quote,not-applicable,false,"No positive requirement, so no pack is billed."
 S18,pack-two-of-three,pack-billing-local,not a priced city,true,false,,,1,1,3,3,n/a,not-applicable,false,"1 whole pack cover 2. The billed quantity is 3, not a prorated fraction."
 S19,pack-exact-three,pack-billing-local,not a priced city,true,false,,,1,1,3,3,n/a,not-applicable,false,"1 whole pack cover 3. The billed quantity is 3, not a prorated fraction."

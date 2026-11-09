@@ -543,7 +543,7 @@ function garagePackageHTML(j){
     <div class="finish-picker" role="group">${pkgs.map(([id,label])=>`<button type="button" class="finish-choice ${j.garagePackage===id?'active':''}" data-garage-package="${id}" aria-pressed="${j.garagePackage===id}"><b>${escape(label)}</b><small style="display:block;margin-top:4px;font-size:10px;color:var(--muted)">${escape(startFor(id))}</small></button>`).join('')}</div>
     ${j.garagePackage!=='measured'?`${(cat.disclaimer||'').trim()?`<div class="warn-banner"><b>Garage package baseline:</b> ${escape(cat.disclaimer.trim())}</div>`:''}<div class="notice">1/2/3-car selection uses the configured package <b>starting price</b> from the rate book (not floor $/sq ft). Material, topcoat, and condition/prep adjustments change the price when configured.</div>
       <div class="fields three">
-        ${select('Material / system','job.garageStyle',[['solid','Solid'],['flake','Flake'],['metallic','Metallic'],['sealer','Clear seal'],['custom','Custom / other']])}
+        ${select('Material / system','job.garageStyle',[['solid','Solid'],['flake','Flake'],['metallic','Metallic'],['sealer','Clear seal — use measured sq ft'],['custom','Custom — inspection / override']])}
         ${select('Topcoat','job.garageTopcoat',[['protective','Protective (standard)'],['none','None noted'],['premium','Premium / upgraded']])}
         ${select('Concrete condition','job.garageCondition',[['unknown','Unknown / not inspected'],['good','Good'],['fair','Fair'],['poor','Poor'],['critical','Critical'],['sound','Sound / bare'],['paint','Paint / coating present'],['adhesive','Adhesive residue']])}
       </div>
@@ -1224,7 +1224,7 @@ function baselineSheetHTML(j,s,owner,print){
   ${serviceBlocks||'<p class="method-note">No service baselines for this area.</p>'}
   ${owner?`<h4 style="margin:12px 0 6px;font-size:13px">Product package costs (owner)</h4>${tableHTML(['Product','Package $','Size','Coverage'],productRows)}
   <h4 style="margin:12px 0 6px;font-size:13px">Internal cost rates (owner)</h4>${tableHTML(['Cost / rate','Baseline'],costRowsHtml)}
-  <p class="method-note">Owner cost/product fields are separate from customer selling rates. Chicago Nov 2026 baseline loaded selling rates/catalog only unless you also saved owner costs.</p>`
+  <p class="method-note">Owner cost/product fields are separate from customer selling rates. A purchase-tax rate of 0 means tax is excluded and not verified. It is not a tax exemption. Runtime labor, rental, mileage, supplies, and overhead figures are not verified owner costs.</p>`
   :`<div class="info-banner"><b>Product package costs and internal cost rates are owner-only.</b> Workers see the selling baseline for this area above.</div>`}
   </section>`;
 }
