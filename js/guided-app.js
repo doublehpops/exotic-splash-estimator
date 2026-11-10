@@ -138,9 +138,24 @@ function guidedArea(base){
   applyColorFields(a);
   return a;
 }
+/* Next free ES-YYYYMMDD-NN for the given date, scanning jobs already in this workspace.
+ * E.newJob() always yields -01, so without this every job started on the same day collides. */
+function nextJobNumber(date){
+  const d=String(date||new Date().toLocaleDateString('en-CA')).replaceAll('-','');
+  const prefix='ES-'+d+'-';
+  let max=0;
+  for(const j of state.jobs||[]){
+    const num=String(j&&j.number||'');
+    if(!num.startsWith(prefix))continue;
+    const seq=parseInt(num.slice(prefix.length),10);
+    if(Number.isFinite(seq)&&seq>max)max=seq;
+  }
+  return prefix+String(max+1).padStart(2,'0');
+}
 function guidedJob(base){
   const raw=base||{};
   const j=Object.assign(E.newJob(),raw);
+  if(!raw.number)j.number=nextJobNumber(j.date);
   if(!j.id)j.id=uid();
   if(!j.createdAt)j.createdAt=nowISO();
   j.updatedAt=j.updatedAt||j.createdAt;
@@ -515,8 +530,15 @@ function summaryHTML(){
   ${warnShow.length?`<div class="notice ${owner&&x.profit<0?'error':''}">${warnShow.map(escape).join('<br/><br/>')}</div>`:''}
   <div class="notice">${authMode()?'Job data is saved to your Exotic Splash server account. Photos are stored with the job (large photos increase save time).':'Photos and job data stay in this browser. LocalStorage is limited (~5 MB typical). Export JSON backups regularly. Cloud backup is not configured.'}</div>`;
 }
+/** Image source for a photo: base64 on this device, or a signed Storage URL supplied by the signed-in runtime. */
+function photoSrc(p){
+  if(authMode()&&runtime.photoSrc)return runtime.photoSrc(p)||'';
+  return (p&&p.dataUrl)||'';
+}
 function photoGrid(photos, areaId, bucket){
-  const items=(photos||[]).map(p=>`<div class="photo-card"><button type="button" class="x" data-del-photo="${escape(p.id)}" data-area="${escape(areaId)}" data-bucket="${escape(bucket)}" aria-label="Remove photo">×</button><img src="${p.dataUrl||''}" alt="${escape(p.name||'Photo')}"><div class="meta">${escape(p.name||'Photo')}<br/>${bytesLabel(p.size||0)} · reference only</div></div>`).join('');
+  const items=(photos||[]).map(p=>{const src=photoSrc(p);
+    const img=src?`<img src="${src}" alt="${escape(p.name||'Photo')}">`:`<div class="photo-loading">${p.storagePath?'Loading photo…':'No image'}</div>`;
+    return `<div class="photo-card"><button type="button" class="x" data-del-photo="${escape(p.id)}" data-area="${escape(areaId)}" data-bucket="${escape(bucket)}" aria-label="Remove photo">×</button>${img}<div class="meta">${escape(p.name||'Photo')}<br/>${bytesLabel(p.size||0)} · reference only${p.storagePath?' · stored':''}</div></div>`}).join('');
   return `<div class="photo-grid">${items}<label class="photo-add">+ Add photo reference<input type="file" accept="image/*" hidden data-add-photo data-area="${escape(areaId)}" data-bucket="${escape(bucket)}"></label></div>
   <small class="route-disclosure">Photos are reference only. Enter known wall measurements yourself — this prototype does not auto-measure, diagnose slabs, or use LiDAR/AI. Large images are resized; oversized files show a warning instead of pretending to save.</small>`;
 }
@@ -693,7 +715,7 @@ function stepContact(j){
   </div>
   <div class="fields">${field('Customer name','job.customer')}${field('Company','job.company')}${field('Email','job.email','email')}${field('Phone','job.phone','tel')}
   <div class="field full"><label for="f-job.address">Full job address</label><input id="f-job.address" data-path="job.address" type="text" value="${escape(j.address)}"></div>
-  ${field('Document number','job.number')}${field('Document date','job.date','date')}</div>
+  ${authMode()&&j._serverId?field('Document number','job.number','text','Assigned by the server when the job was first saved.','readonly'):field('Document number','job.number','text',authMode()?'Provisional — the server assigns the final number on first save.':'')}${field('Document date','job.date','date')}</div>
   ${contactSufficient(j)?`<div class="info-banner">Local job <b>${escape(j.id)}</b> is active. Created ${escape((j.createdAt||'').replace('T',' ').slice(0,19))} (UTC). Autosave keeps updates on this device.</div>`
     :`<div class="empty-state"><h3>Waiting for lead details</h3><p>Enter a name (or company) plus phone, email, or address to create the persistent local job record.</p></div>`}
   <div class="divider"></div>
@@ -868,6 +890,10 @@ function discountRequestHTML(j){
   const owner=isOwner();
   const DC=window.EsDiscountClient;
   const serverId=j.discountApprovalId&&DC&&DC.isServerApprovalId(j.discountApprovalId);
+  /* The server's preview carries the live approval status; it wins over the copy saved with the job
+     (e.g. the owner approved from the Approvals inbox and this device has not reloaded the job). */
+  const sq=serverQuotes[j.id];const live=authMode()&&serverId&&sq&&sq.staff&&sq.staff.discountStatus;
+  if(live&&live!=='none'&&live!==j.discountServerStatus)j.discountServerStatus=live;
   const status=authMode()?(serverId?(j.discountServerStatus||'pending'):'none'):(j.discountServerStatus||'none');
   const ask=`<div class="fields three">${field('Extra discount amount ($)','job.discountRequestAmount','number','Dollars off the selected tier only. Leave blank to use a percent.')}${field('Or percent (%)','job.discountRequestPercent','number','Use one, not both.')}${field('Reason','job.discountRequestReason','text','Required. Shown on the approval record.')}</div>
   <button type="button" class="button secondary" id="requestExtraDiscount">Request owner approval</button>`;
@@ -1631,11 +1657,11 @@ function openMapsDirections(){
 
 function render(){
   ensureJob();
-  const v=['guided','rates','customer','guide','subcontractor','internal','jobs'].concat(authMode()&&isOwner()?['staff']:[]).includes(state.view)?state.view:'guided';
+  const v=['guided','rates','customer','guide','subcontractor','internal','jobs'].concat(authMode()?['approvals']:[]).concat(authMode()&&isOwner()?['staff']:[]).includes(state.view)?state.view:'guided';
   state.view=v;
   document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active',b.dataset.view===v));
-  $('breadcrumb').textContent='Guided / '+({guided:'Field workflow',rates:'Costs & pricing',customer:'Customer document',guide:'Install guide',subcontractor:'Subcontractor',internal:'Internal job-cost',jobs:'Job list',staff:'Staff access'}[v]);
-  const map={guided:guidedView,rates:ratesView,customer:customerView,guide:guideView,subcontractor:subView,internal:internalView,jobs:jobsView,staff:()=>runtime.staffViewHTML?runtime.staffViewHTML():''};
+  $('breadcrumb').textContent='Guided / '+({guided:'Field workflow',rates:'Costs & pricing',customer:'Customer document',guide:'Install guide',subcontractor:'Subcontractor',internal:'Internal job-cost',jobs:'Job list',staff:'Staff access',approvals:'Discount approvals'}[v]);
+  const map={guided:guidedView,rates:ratesView,customer:customerView,guide:guideView,subcontractor:subView,internal:internalView,jobs:jobsView,staff:()=>runtime.staffViewHTML?runtime.staffViewHTML():'',approvals:()=>runtime.approvalsViewHTML?runtime.approvalsViewHTML():''};
   $('main').innerHTML=map[v]();
   updateLive();
   save({silent:true});
@@ -1760,11 +1786,13 @@ function readPhotoFile(file, areaId, bucket){
       if(dataUrl.length>PHOTO_MAX_BYTES){toast('Photo too large even after compression ('+bytesLabel(dataUrl.length)+'). Not saved — use a smaller image.');return}
       const j=activeJob();const area=j.areas.find(a=>a.id===areaId);if(!area)return;
       const list=area[bucket]||(area[bucket]=[]);
-      const probe=JSON.stringify(state).length+dataUrl.length;
-      if(probe>STORE_SOFT_LIMIT){toast('Saving this photo would exceed browser storage budget. Export a backup and remove older photos first. Photo NOT saved.');return}
+      if(!authMode()){
+        const probe=JSON.stringify(state).length+dataUrl.length;
+        if(probe>STORE_SOFT_LIMIT){toast('Saving this photo would exceed browser storage budget. Export a backup and remove older photos first. Photo NOT saved.');return}
+      }
       list.push({id:photoUid(),name:file.name||'photo.jpg',dataUrl,size:dataUrl.length,addedAt:nowISO(),note:'Photo reference only'});
       pushHistory(j,'photo','Photo added to '+area.name+' ('+bucket+')',file.name||'');
-      render();toast('Photo saved locally ('+bytesLabel(dataUrl.length)+').');
+      render();toast(authMode()?'Photo attached ('+bytesLabel(dataUrl.length)+') — uploads to Storage with the next save.':'Photo saved locally ('+bytesLabel(dataUrl.length)+').');
     };
     img.onerror=()=>toast('Could not read image.');
     img.src=reader.result;
@@ -1855,7 +1883,7 @@ document.addEventListener('click',e=>{
   if(t.dataset.removeArea!==undefined){activeJob().areas.splice(Number(t.dataset.removeArea),1);render()}
   if(t.dataset.addRect!==undefined){activeJob().areas[Number(t.dataset.addRect)].rectangles.push({length:0,width:0});render()}
   if(t.dataset.delRect!==undefined){const a=activeJob().areas[Number(t.dataset.areaIndex)];a.rectangles.splice(Number(t.dataset.delRect),1);if(!a.rectangles.length)a.rectangles.push({length:0,width:0});syncAreaSqft(a);render()}
-  if(t.dataset.delPhoto){const area=activeJob().areas.find(a=>a.id===t.dataset.area);if(area){area[t.dataset.bucket]=(area[t.dataset.bucket]||[]).filter(p=>p.id!==t.dataset.delPhoto);render()}}
+  if(t.dataset.delPhoto){const area=activeJob().areas.find(a=>a.id===t.dataset.area);if(area){const gone=(area[t.dataset.bucket]||[]).filter(p=>p.id===t.dataset.delPhoto);area[t.dataset.bucket]=(area[t.dataset.bucket]||[]).filter(p=>p.id!==t.dataset.delPhoto);if(authMode()&&runtime.photoRemoved)gone.forEach(runtime.photoRemoved);render()}}
   if(t.dataset.switchJob){state.activeJobId=t.dataset.switchJob;render();toast('Switched job')}
   if(t.dataset.colorKey!==undefined){const a=activeJob().areas[Number(t.dataset.areaIndex)];a.colorKey=t.dataset.colorKey;applyColorFields(a);render()}
   if(t.dataset.flakeBlend!==undefined){const a=activeJob().areas[Number(t.dataset.areaIndex)];a.flakeBlend=t.dataset.flakeBlend;applyColorFields(a);render()}
@@ -1893,7 +1921,7 @@ document.addEventListener('click',e=>{
   }
   if(t.classList.contains('dialog-close'))$('helpDialog').close();
 });
-window.GuidedApp={get state(){return state},calc,ensureJob,guidedJob,guidedArea,computeAreaSqft,syncPrepIntoEngineFields,contactSufficient,backupObject,restoreObject,loadIllustrativeSample,STORAGE_KEY,STEPS,PREP_ITEMS,BASE_COLORS,FLAKE_BLENDS,E,save,render,activeJob,pushHistory,customerDocument,customerGuideDocument,customerVisibleLines,quoteAllocation,approvedAdjustmentCap,approvedAdjustmentLabel,clampJobDiscountToCap,jobSelectionFlags,moisturePriceEstimate,moistureSelectedAreas,subcontractorDocument,internalContent,equipmentPlan,calculateRoute,geocode,isOwner,go,goStep,APP_VERSION,resolveBaseColor,resolveFlakeBlend,applyColorFields,isCatalogJob,priceNeededBanner,catalogBreakdownDocHTML,requestExtraDiscount,decideExtraDiscount,
+window.GuidedApp={get state(){return state},calc,ensureJob,guidedJob,nextJobNumber,guidedArea,computeAreaSqft,syncPrepIntoEngineFields,contactSufficient,backupObject,restoreObject,loadIllustrativeSample,STORAGE_KEY,STEPS,PREP_ITEMS,BASE_COLORS,FLAKE_BLENDS,E,save,render,activeJob,pushHistory,customerDocument,customerGuideDocument,customerVisibleLines,quoteAllocation,approvedAdjustmentCap,approvedAdjustmentLabel,clampJobDiscountToCap,jobSelectionFlags,moisturePriceEstimate,moistureSelectedAreas,subcontractorDocument,internalContent,equipmentPlan,calculateRoute,geocode,isOwner,go,goStep,APP_VERSION,resolveBaseColor,resolveFlakeBlend,applyColorFields,isCatalogJob,priceNeededBanner,catalogBreakdownDocHTML,requestExtraDiscount,decideExtraDiscount,
   calcLocal,updateLive,authMode,quoteKey,quoteInput,setServerQuote,serverQuotes,stripCosts,overlayServer,LEGACY_KEYS,toast,
   get runtime(){return runtime},boot};
 /** v7: the page decides the mode. demo -> local storage (NOT SECURE). auth -> rt.profile/settings/jobs from server. */

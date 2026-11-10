@@ -66,6 +66,27 @@ check('typed discount does not change the total without a bound tier',()=>{
   assert.strictEqual(bound.total,600);
   assert.strictEqual(bound.choices.regular.total,1000);
 });
+check('a flatwork item with no dimensions stays pending instead of pricing as the smallest band',()=>{
+  const s=JSON.parse(JSON.stringify(E.defaults));
+  s.catalog.flatwork.sizeBands[0].starting=500;
+  s.catalog.flatwork.materialAdj.solid=0;
+  const j=E.newJob();
+  j.customer='Synthetic';j.tax=0;j.miles=0;j.minutes=0;
+  j.projectType='flatwork';
+  const it=E.newFlatItem();it.condition='good';
+  j.catalogItems=[it];
+  const blank=E.calculate(j,s);
+  assert.strictEqual(blank.quoteReady,false);
+  assert.strictEqual(blank.total,0);
+  assert.ok(blank.pendingReasons.some(r=>/enter size\/dimensions/i.test(r)),blank.pendingReasons.join(' | '));
+  assert.strictEqual(E.flatworkBandForSqft(s.catalog,0),null);
+  it.length=2;it.width=2;
+  const sized=E.calculate(j,s);
+  assert.strictEqual(sized.quoteReady,true);
+  assert.strictEqual(sized.total,500);
+  assert.strictEqual(E.flatworkBandForSqft(s.catalog,4).id,'small');
+});
+
 let approvalSeq=0;
 function approvalId(){approvalSeq+=1;return '00000000-0000-4000-8000-'+String(approvalSeq).padStart(12,'0')}
 function serverStore(){return DA.createStore({idFactory:approvalId})}

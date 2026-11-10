@@ -5,6 +5,7 @@
 (function(root,factory){const api=factory();if(typeof module==='object'&&module.exports)module.exports=api;else root.EsCloud=api})(typeof globalThis!=='undefined'?globalThis:this,function(){
 'use strict';
 const JOB_COLS='id,client_ref,job_number,customer_label,job_data,status,version,created_by,assigned_staff,updated_at,discount_amount';
+const PHOTO_BUCKET='job-photos';
 class CloudError extends Error{constructor(code,message,cause){super(message);this.code=code;this.cause=cause}}
 function friendly(err){
   const m=String(err&&(err.message||err.error_description||err)||'');
@@ -86,7 +87,28 @@ function create(client,opts){
     async getSharedEstimate(token){return unwrap(await client.rpc('get_shared_estimate',{p_token:token}))},
     /* ---------- staff (owner) ---------- */
     async listStaff(){return unwrap(await client.rpc('owner_list_staff'))||[]},
-    async setStaffAccess(userId,role,active,reason){return unwrap(await client.rpc('owner_set_staff_access',{p_user_id:userId,p_role:role,p_active:active,p_reason:reason||''}))}
+    async setStaffAccess(userId,role,active,reason){return unwrap(await client.rpc('owner_set_staff_access',{p_user_id:userId,p_role:role,p_active:active,p_reason:reason||''}))},
+    /* ---------- discount request inbox (read-only; decisions go through quote()) ---------- */
+    async listDiscountRequests(status){return unwrap(await client.rpc('owner_list_discount_requests',{p_status:status||'pending'}))||[]},
+    async listMyDiscountRequests(){return unwrap(await client.rpc('staff_list_my_discount_requests'))||[]},
+    /* ---------- customer acceptance (anon on the share page; staff list) ---------- */
+    async acceptSharedEstimate(token,name,note){return unwrap(await client.rpc('accept_shared_estimate',{p_token:token,p_name:name,p_note:note||''}))},
+    async getEstimateAcceptance(token){return unwrap(await client.rpc('get_estimate_acceptance',{p_token:token}))},
+    async listAcceptances(){return unwrap(await client.rpc('staff_list_estimate_acceptances'))||[]},
+    /* ---------- job photos: private Storage bucket, path <job uuid>/<photo id>.jpg ---------- */
+    photoPath(jobId,photoId){return String(jobId)+'/'+String(photoId||'').replace(/[^A-Za-z0-9_-]/g,'')+'.jpg'},
+    async uploadPhoto(jobId,photoId,blob){
+      const path=api.photoPath(jobId,photoId);
+      const r=await client.storage.from(PHOTO_BUCKET).upload(path,blob,{contentType:'image/jpeg',upsert:true});
+      if(r.error)throw friendly(r.error);
+      return path;
+    },
+    async signedPhotoUrl(path,seconds){
+      const r=await client.storage.from(PHOTO_BUCKET).createSignedUrl(path,seconds||3600);
+      if(r.error)throw friendly(r.error);
+      return r.data.signedUrl;
+    },
+    async deletePhoto(path){const r=await client.storage.from(PHOTO_BUCKET).remove([path]);if(r.error)throw friendly(r.error);return true}
   };
   return api;
 }
@@ -94,5 +116,5 @@ function shareUrl(base,token){
   const u=String(base||'').replace(/[#?].*$/,'').replace(/[^/]*$/,'')+'estimate.html';
   return u+'#t='+encodeURIComponent(token);
 }
-return{create,CloudError,friendly,shareUrl,JOB_COLS};
+return{create,CloudError,friendly,shareUrl,JOB_COLS,PHOTO_BUCKET};
 });

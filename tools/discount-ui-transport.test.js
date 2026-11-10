@@ -107,5 +107,16 @@ jobs[JOB].job_data=G.quoteInput(j);
   const forged=await DC.requestDiscount(async()=>({ok:true,request:{id:'da_1',status:'pending'}}),{serverId:JOB,amount:100,reason:'TEST'});
   assert.strictEqual(forged.ok,false);
   assert.strictEqual(forged.code,'invalid_approval_id');
+
+  // Same-day job numbers must not collide. The first job came from boot(); add two more.
+  const first=G.activeJob();
+  const prefix='ES-'+first.date.replaceAll('-','')+'-';
+  assert.strictEqual(first.number,prefix+'01');
+  const second=G.guidedJob();G.state.jobs.push(second);
+  const third=G.guidedJob();G.state.jobs.push(third);
+  assert.strictEqual(second.number,prefix+'02');
+  assert.strictEqual(third.number,prefix+'03');
+  assert.strictEqual(new Set(G.state.jobs.map(x=>x.number)).size,G.state.jobs.length);
+  assert.strictEqual(G.guidedJob({number:'ES-20200101-07'}).number,'ES-20200101-07','loaded jobs keep their number');
   console.log('ui transport checks passed');
 })().catch(err=>{console.error(err);process.exit(1)});

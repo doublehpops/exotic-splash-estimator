@@ -119,13 +119,16 @@ async function enterApp(){
     const jobs=rows.map(r=>rowToJob(r,owner?markups[r.id]:undefined,settings));
     applyOutbox(profile.id,jobs);
     rt={mode:'auth',profile,settings,jobs,priceBook:{version:pb?pb.version:null,updatedAt:pb?pb.updated_at:null,ownerEmpty:owner?isEmptyBook(pb):null,sig:owner?bookSig(settings):null},
-      syncStatus:'connected',onSave,requestPreview,discountCall,onClick,priceBookPanelHTML,sharePanelHTML,staffViewHTML,jobsExtraHTML,shares:{},newShare:null,staffList:null,audit:null,localScan:null};
+      syncStatus:'connected',onSave,requestPreview,discountCall,onClick,priceBookPanelHTML,sharePanelHTML,staffViewHTML,jobsExtraHTML,approvalsViewHTML,photoSrc,photoRemoved,
+      shares:{},newShare:null,staffList:null,audit:null,localScan:null,approvals:null,approvalFilter:'pending',approvalsPending:0,acceptances:null};
     $('gate').hidden=true;$('appRoot').hidden=false;
     D.body.classList.add('mode-auth');D.body.classList.remove('mode-demo');
     decorateShell();
     G().boot(rt);
     for(const j of G().state.jobs)j._savedSig=j._savedSig||jobSig(j);
     if(outboxIds.size){for(const id of outboxIds)dirty.add(id);scheduleFlush(200)}
+    refreshApprovalBadge();loadAcceptances();
+    if(!badgeTimer)badgeTimer=setInterval(()=>{if(rt)refreshApprovalBadge()},120000);
   }catch(e){showError(e.message||String(e))}
 }
 function isEmptyBook(pb){return !pb||!pb.owner_settings||!Object.keys(pb.owner_settings).length}
@@ -133,6 +136,7 @@ function bookSig(settings){const s=Q().splitSettings(settings);return JSON.strin
 function rowToJob(r,markup,settings){
   const d=Object.assign({},r.job_data||{});
   d.id=d.id||r.client_ref||r.id;
+  if(r.job_number)d.number=r.job_number; // server-assigned ES-YYYYMMDD-NN wins over the client's provisional number
   d._serverId=r.id;d._version=r.version;d._status=r.status;d._createdBy=r.created_by;d._clientRef=r.client_ref;d._updatedAt=r.updated_at;
   if(markup!==undefined){d.markup=markup;d._markup=markup}
   else if(settings&&settings.costs&&!settings._redacted){d.markup=Number(settings.costs.markup)||0;d._markup=null}
@@ -146,6 +150,7 @@ function decorateShell(){
   $('sideCloud').className='cloud-badge on';$('sideCloud').textContent='SERVER SYNC ON';
   $('restoreLabel').hidden=true;
   $('signOutTop').hidden=false;
+  if(!D.querySelector('#nav [data-view="approvals"]')){const b=D.createElement('button');b.dataset.view='approvals';b.innerHTML='✓ <span>Approvals</span><span class="nav-badge" id="esApprovalBadge" hidden></span>';$('nav').appendChild(b)}
   if(owner&&!D.querySelector('#nav [data-view="staff"]')){const b=D.createElement('button');b.dataset.view='staff';b.innerHTML='👥 <span>Staff access</span>';$('nav').appendChild(b)}
   $('footMode').textContent='v7 · signed in · server-verified pricing';
 }
@@ -164,9 +169,63 @@ function jobPayload(j){
   for(const k of Object.keys(c))if(k.charAt(0)==='_')delete c[k];
   delete c.markup; // owner markup lives in job_owner_pricing, never in job_data
   delete c.updatedAt;
+  // photos that reached Storage are referenced by path only; the base64 copy stays on this device
+  for(const a of c.areas||[])for(const b of PHOTO_BUCKETS)if(Array.isArray(a[b]))a[b]=a[b].map(p=>p&&p.storagePath?Object.assign({},p,{dataUrl:undefined}):p);
   return c;
 }
 function jobSig(j){const c=jobPayload(j);return JSON.stringify(c)}
+function applyRow(j,row){
+  if(!row)return;
+  j._serverId=row.id;j._version=row.version;j._status=row.status;j._clientRef=row.client_ref;j._createdBy=row.created_by;delete j._local;
+  if(row.job_number)j.number=row.job_number;
+}
+
+/* ------------------------------------------------------------------ photos (Storage) */
+const PHOTO_BUCKETS=['photos','conditionPhotos'];
+const photoCache=new Map();const photoPending=new Set();let photoRefreshTimer=null,photoUploadWarned=false;
+function dataUrlToBlob(dataUrl){
+  const m=/^data:([^;,]+)?(;base64)?,(.*)$/s.exec(String(dataUrl||''));
+  if(!m)throw new Error('Not a data URL');
+  const mime=m[1]||'image/jpeg';
+  if(!m[2])return new Blob([decodeURIComponent(m[3])],{type:mime});
+  const bin=W.atob(m[3]);const bytes=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
+  return new Blob([bytes],{type:mime});
+}
+/** Upload every photo that is still base64-only on a saved job. Returns how many moved. */
+async function migratePhotos(j){
+  if(!j||!j._serverId||!cloud||!cloud.uploadPhoto)return 0;
+  let moved=0;
+  for(const a of j.areas||[])for(const b of PHOTO_BUCKETS)for(const p of a[b]||[]){
+    if(!p||p.storagePath||!p.dataUrl)continue;
+    try{
+      const path=await cloud.uploadPhoto(j._serverId,p.id,dataUrlToBlob(p.dataUrl));
+      photoCache.set(path,p.dataUrl);
+      p.storagePath=path;delete p.dataUrl;moved++;
+    }catch(e){
+      if(e&&e.code==='network')throw e;
+      if(!photoUploadWarned){photoUploadWarned=true;toast('Photo upload to Storage failed ('+(e&&e.message||e)+'). Photos stay inside the job record until it works.')}
+    }
+  }
+  return moved;
+}
+/** src for an <img>: base64 if we have it, else a cached signed URL, else '' while one is fetched. */
+function photoSrc(p){
+  if(!p)return '';
+  if(p.dataUrl)return p.dataUrl;
+  if(!p.storagePath||!cloud)return '';
+  const hit=photoCache.get(p.storagePath);if(hit)return hit;
+  if(!photoPending.has(p.storagePath)){
+    photoPending.add(p.storagePath);
+    cloud.signedPhotoUrl(p.storagePath,3600).then(u=>{
+      photoCache.set(p.storagePath,u);
+      setTimeout(()=>{if(photoCache.get(p.storagePath)===u)photoCache.delete(p.storagePath)},50*60*1000);
+      clearTimeout(photoRefreshTimer);photoRefreshTimer=setTimeout(refreshView,150);
+    }).catch(()=>{}).finally(()=>photoPending.delete(p.storagePath));
+  }
+  return '';
+}
+function photoRemoved(p){if(p&&p.storagePath&&cloud&&cloud.deletePhoto){photoCache.delete(p.storagePath);cloud.deletePhoto(p.storagePath).catch(()=>{})}}
 function outboxKey(){return 'es-v7-outbox:'+(rt?rt.profile.id:'')}
 function writeOutbox(){
   if(!rt)return;
@@ -194,13 +253,11 @@ async function flush(){
   try{
     for(const id of Array.from(dirty)){
       const j=G().state.jobs.find(x=>x.id===id);if(!j){dirty.delete(id);continue}
-      const sig=jobSig(j);const data=jobPayload(j);
       try{
-        let row;
-        if(j._serverId){if(sig!==j._savedSig)row=await cloud.updateJob(j._serverId,j._version,data)}
-        else row=await cloud.insertJob(j._clientRef||j.id,data);
-        if(row){j._serverId=row.id;j._version=row.version;j._status=row.status;j._clientRef=row.client_ref;j._createdBy=row.created_by;delete j._local}
-        j._savedSig=sig;
+        if(!j._serverId){applyRow(j,await cloud.insertJob(j._clientRef||j.id,jobPayload(j)));j._savedSig=jobSig(j)}
+        await migratePhotos(j); // needs the server id; changes the payload when photos move to Storage
+        const sig=jobSig(j);
+        if(sig!==j._savedSig){applyRow(j,await cloud.updateJob(j._serverId,j._version,jobPayload(j)));j._savedSig=sig}
         if(rt.profile.role==='owner'&&j._serverId&&Number(j.markup)!==Number(j._markup)){await cloud.setJobMarkup(j._serverId,Number(j.markup)||0);j._markup=Number(j.markup)||0}
         dirty.delete(id);
       }catch(e){
@@ -284,13 +341,69 @@ async function reloadPriceBook(){
   G().render();toast('Price book reloaded (v'+pb.version+').');
 }
 
+/* ------------------------------------------------------------------ discount request inbox */
+const money=v=>(Number(v)||0).toLocaleString('en-US',{style:'currency',currency:'USD'});
+let badgeTimer=null;
+const APPROVAL_FILTERS=[['pending','Pending'],['approved','Approved'],['rejected','Rejected'],['stale','Stale'],['consumed','Applied'],['','All']];
+function approvalsViewHTML(){
+  const owner=rt.profile.role==='owner';const list=rt.approvals;
+  const rows=(list||[]).map(r=>`<tr>
+    <td>${esc(r.jobNumber||'')}<small>${esc(r.customer||'')}</small></td>
+    ${owner?`<td>${esc(r.requesterName||r.requesterEmail||'')}<small>${esc(new Date(r.requestedAt).toLocaleString())}</small></td>`:`<td>${esc(new Date(r.requestedAt).toLocaleString())}</td>`}
+    <td>${esc(r.tier||'')}</td>
+    <td class="num">${money(r.beforeTotal)}<small>−${money(r.amount)}${r.percent!=null?' ('+esc(r.percent)+'%)':''} → ${money(r.afterTotal)}</small></td>
+    <td>${esc(r.reason||'')}</td>
+    <td>${esc(r.status||'')}${r.decidedAt?'<small>'+esc(new Date(r.decidedAt).toLocaleString())+'</small>':''}</td>
+    <td>${owner&&r.status==='pending'?`<button type="button" class="button small" data-approve-id="${esc(r.id)}" data-estimate-id="${esc(r.estimateId)}">Approve</button> <button type="button" class="quiet" data-reject-id="${esc(r.id)}" data-estimate-id="${esc(r.estimateId)}">Reject</button>`:''}</td>
+  </tr>`).join('');
+  return `<div class="view-heading"><span class="eyebrow">${owner?'OWNER':'MY REQUESTS'}</span><h1>Extra-discount approvals.</h1><p>${owner?'Requests from staff for a reduction below the approved price. Approving binds the reduction to that estimate revision and price tier; the customer total only changes once the server applies it.':'Your extra-discount requests and what the owner decided. Pending and rejected requests leave every total unchanged.'}</p></div>
+  <section class="card es-approvals">
+  <div class="inline-actions">${owner?`<label class="es-inline">Show <select id="esApprovalFilter">${APPROVAL_FILTERS.map(([v,l])=>`<option value="${v}" ${v===(rt.approvalFilter||'')?'selected':''}>${l}</option>`).join('')}</select></label>`:''}<button type="button" class="quiet" id="esReloadApprovals">Reload</button></div>
+  ${list?`<div class="table-wrap"><table><thead><tr><th>Job</th><th>${owner?'Requested by':'Requested'}</th><th>Tier</th><th class="num">Before → after</th><th>Reason</th><th>Status</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="7">Nothing here.</td></tr>'}</tbody></table></div>`:'<p class="method-note">Loading…</p>'}
+  </section>`;
+}
+async function loadApprovals(){
+  if(!rt)return;
+  try{rt.approvals=rt.profile.role==='owner'?await cloud.listDiscountRequests(rt.approvalFilter||''):await cloud.listMyDiscountRequests()}
+  catch(e){rt.approvals=[];toast(e.message)}
+  if(G().state.view==='approvals')G().render();
+}
+async function refreshApprovalBadge(){
+  if(!rt||rt.profile.role!=='owner')return;
+  try{rt.approvalsPending=(await cloud.listDiscountRequests('pending')).length}catch{return}
+  const b=$('esApprovalBadge');if(b){b.textContent=String(rt.approvalsPending);b.hidden=!rt.approvalsPending}
+}
+async function decideFromInbox(id,estimateId,decision){
+  if(decision==='reject'&&!W.confirm('Reject this discount request? The customer total stays unchanged.'))return;
+  try{
+    const res=await cloud.quote('discount-decide',estimateId,null,{id,decision,estimateId});
+    const j=G().state.jobs.find(x=>x._serverId===estimateId);
+    if(j){j.discountServerStatus=(res.request&&res.request.status)||(decision==='approve'?'approved':'rejected');delete G().serverQuotes[j.id];onSave(j)}
+    toast(decision==='approve'?'Approved. The reduction applies to that estimate revision and tier.':'Rejected.');
+    await loadApprovals();refreshApprovalBadge();
+  }catch(e){toast(e.code==='conflict'?'That request is no longer pending — reloading.':e.message);loadApprovals()}
+}
+
+/* ------------------------------------------------------------------ customer acceptances */
+async function loadAcceptances(){
+  if(!rt)return;
+  try{rt.acceptances=await cloud.listAcceptances()}catch(e){rt.acceptances=[]}
+  if(G().state.view==='jobs'||G().state.view==='guided')refreshView();
+}
+function acceptanceFor(j){return (rt.acceptances||[]).find(a=>a.estimateNumber&&j&&a.estimateNumber===j.number)||null}
+function acceptanceBannerHTML(a){
+  if(!a)return '';
+  return `<div class="gate-ok es-accepted" role="status"><b>Accepted by ${esc(a.acceptedName)}</b> on ${esc(new Date(a.acceptedAt).toLocaleString())}${a.total!=null?' · total '+esc(money(a.total)):''}${a.acceptedNote?'<br/><small>“'+esc(a.acceptedNote)+'”</small>':''}</div>`;
+}
+
 /* ------------------------------------------------------------------ customer share */
 function sharePanelHTML(j,x){
   const shares=rt.shares[j._serverId]||null;
   const ns=rt.newShare&&rt.newShare.jobId===j._serverId?rt.newShare:null;
   if(!j._serverId)return `<section class="card es-share" style="margin-top:14px"><h3>Customer link</h3><p class="method-note">Saving this job to the server… a customer link is available once it is saved.</p></section>`;
   return `<section class="card es-share" style="margin-top:14px"><h3>Customer link (read-only estimate)</h3>
-  <p class="method-note">Customers never sign in. A link shows only the customer-safe estimate (scope, approved prices, payments, terms) — no costs, markup, profit, margin, pay, or internal notes. The server recomputes the price before issuing it.</p>
+  ${acceptanceBannerHTML(acceptanceFor(j))}
+  <p class="method-note">Customers never sign in. A link shows only the customer-safe estimate (scope, approved prices, payments, terms) — no costs, markup, profit, margin, pay, or internal notes. The server recomputes the price before issuing it. The customer can accept the estimate from the link; acceptances show here and under Jobs.</p>
   ${x.quoteReady?'':'<div class="warn-banner"><b>Pending quote.</b> Links can only be issued after all required prices are configured and the server confirms the total.</div>'}
   <div class="inline-actions"><label class="es-inline">Valid for <select id="esShareDays"><option value="14">14 days</option><option value="30" selected>30 days</option><option value="60">60 days</option><option value="90">90 days</option></select></label>
   <button type="button" class="button" id="esCreateShare" ${x.quoteReady?'':'disabled'}>Verify with server &amp; create link</button>
@@ -340,7 +453,12 @@ function jobsExtraHTML(){
   return `<section class="card es-jobs-extra"><div class="inline-actions"><span class="cloud-badge on">SERVER · ${esc(rt.syncStatus)}</span><button type="button" class="quiet" id="esReloadJobs">Reload from server</button><button type="button" class="quiet" id="esScanLocal">Find offline jobs on this device</button></div>
   ${scan?(scan.length?`<div class="es-import"><p class="method-note">Offline/demo jobs found in this browser. Nothing is uploaded until you tick jobs and press <b>Import selected</b>. Local copies are never deleted. Prices are recalculated with the server price book.</p>
   ${scan.map((s,i)=>`<label class="check es-import-row"><input type="checkbox" data-import-index="${i}"> ${esc(s.label)} <small>${esc(s.source)}</small></label>`).join('')}
-  <button type="button" class="button secondary" id="esImportLocal">Import selected</button></div>`:'<p class="method-note">No offline jobs found in this browser.</p>'):''}</section>`;
+  <button type="button" class="button secondary" id="esImportLocal">Import selected</button></div>`:'<p class="method-note">No offline jobs found in this browser.</p>'):''}</section>
+  <section class="card es-acceptances"><h3>Customer acceptances</h3>
+  <p class="method-note">Estimates accepted by customers from their share link. Matched to jobs by document number.</p>
+  <div class="inline-actions"><button type="button" class="quiet" id="esReloadAcceptances">Reload</button></div>
+  ${rt.acceptances?`<div class="table-wrap"><table><thead><tr><th>Estimate</th><th>Customer</th><th>Accepted by</th><th>When</th><th class="num">Total</th></tr></thead><tbody>${(rt.acceptances||[]).slice(0,50).map(a=>`<tr><td>${esc(a.estimateNumber||'')}</td><td>${esc(a.customerName||'')}</td><td>${esc(a.acceptedName||'')}${a.acceptedNote?'<small>'+esc(a.acceptedNote)+'</small>':''}</td><td>${esc(new Date(a.acceptedAt).toLocaleString())}</td><td class="num">${a.total!=null?esc(money(a.total)):''}</td></tr>`).join('')||'<tr><td colspan="5">No acceptances yet.</td></tr>'}</tbody></table></div>`:'<p class="method-note">Loading…</p>'}
+  </section>`;
 }
 function scanLocal(){
   const keys=['exotic-splash-estimator-v7'].concat(G().LEGACY_KEYS);const out=[];const seen=new Set(G().state.jobs.map(j=>j.id));
@@ -373,6 +491,9 @@ async function reloadJobs(){
 function onClick(t){
   if(!rt)return false;
   if(t.dataset.view==='staff'){G().go('staff');loadStaff();return true}
+  if(t.dataset.view==='approvals'){G().go('approvals');loadApprovals();refreshApprovalBadge();return true}
+  if(t.dataset.approveId){decideFromInbox(t.dataset.approveId,t.dataset.estimateId,'approve');return true}
+  if(t.dataset.rejectId){decideFromInbox(t.dataset.rejectId,t.dataset.estimateId,'reject');return true}
   if(t.dataset.revokeShare){revoke(t.dataset.revokeShare);return true}
   if(t.dataset.staffId){staffAction(t.dataset.staffId,t.dataset.staffAction);return true}
   switch(t.id){
@@ -386,6 +507,8 @@ function onClick(t){
     case 'esScanLocal':scanLocal();return true;
     case 'esImportLocal':importLocal();return true;
     case 'esReloadStaff':loadStaff();return true;
+    case 'esReloadApprovals':loadApprovals();refreshApprovalBadge();return true;
+    case 'esReloadAcceptances':loadAcceptances();return true;
     case 'restore':case 'restoreInline':toast('Restore is disabled while signed in.');return true;
   }
   return false;
@@ -426,6 +549,10 @@ D.addEventListener('click',ev=>{
     case 'gateSignOut':case 'signOutTop':if(rt)doSignOut();else if(cloud)cloud.signOut().finally(()=>W.location.reload());break;
     case 'gateRetry':enterApp();break;
   }
+});
+D.addEventListener('change',ev=>{
+  const t=ev.target;
+  if(t&&t.id==='esApprovalFilter'&&rt){rt.approvalFilter=t.value;loadApprovals()}
 });
 W.addEventListener('beforeunload',e=>{if(rt&&(dirty.size||inflight)){writeOutbox();e.preventDefault();e.returnValue=''}});
 

@@ -14,9 +14,22 @@ const Q = g.EsQuoteCore;
 const ALLOWED_ORIGINS = (Deno.env.get("ES_ALLOWED_ORIGINS") ?? "")
   .split(",").map((s) => s.trim()).filter(Boolean);
 
+let warnedNoOrigins = false;
+
 function cors(req: Request): Record<string, string> {
   const origin = req.headers.get("Origin") ?? "";
-  const allow = ALLOWED_ORIGINS.length === 0 ? "" : (ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0]);
+  let allow: string;
+  if (ALLOWED_ORIGINS.length === 0) {
+    // Unset means the browser would get no CORS header and every call would fail silently.
+    // Echo the caller's origin so the app works, and say so in the logs until it is set.
+    allow = origin;
+    if (!warnedNoOrigins) {
+      warnedNoOrigins = true;
+      console.warn("ES_ALLOWED_ORIGINS is not set; echoing the request Origin. Set it to the site origin (see SUPABASE_SETUP.md).");
+    }
+  } else {
+    allow = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
+  }
   const h: Record<string, string> = {
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
     "Access-Control-Allow-Methods": "POST, OPTIONS",

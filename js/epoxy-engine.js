@@ -77,6 +77,8 @@ function garageStartingKey(pkg){
 function flatworkBandForSqft(cat,sqft){
   const bands=(cat&&cat.flatwork&&cat.flatwork.sizeBands)||catalogDefaults.flatwork.sizeBands;
   const sf=n(sqft);
+  /* No measured size = no band. Otherwise a 0 sq ft item would match the smallest band and get priced. */
+  if(!(sf>0))return null;
   for(const b of bands){
     if(b.maxSqft==null||b.maxSqft===''){if(sf>0)return b;continue;}
     if(sf<=n(b.maxSqft))return b;

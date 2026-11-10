@@ -21,6 +21,12 @@ td small{display:block;color:#66736f;font-size:12px}.num{text-align:right;white-
 .est-opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}.opt{border:1px solid #d9e1de;border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:4px}.opt.sel{border-color:#163d37;background:#eef6f3}
 .est-pre{white-space:pre-wrap}.est-note{font-size:13px;color:#55625f}.est-foot{margin-top:22px;font-size:12px;color:#66736f;border-top:1px solid #e5ebe9;padding-top:10px}
 .state{padding:28px;text-align:center;color:#55625f}
+.est-accept{margin-top:22px;padding:16px;border:1px solid #c7dcb0;border-radius:12px;background:#f6faf2}
+.est-accept h2{margin-top:0}.est-accept label{display:grid;gap:6px;font-size:14px;font-weight:600;margin:10px 0}
+.est-accept input,.est-accept textarea{font:inherit;padding:10px;border:1px solid #d9e1de;border-radius:8px;font-size:16px}
+.est-accept button{font:inherit;font-weight:700;padding:12px 18px;border:0;border-radius:10px;background:#163d37;color:#fff;cursor:pointer}
+.est-accept button[disabled]{opacity:.6;cursor:default}.est-accept-msg{margin-top:10px;color:#7a2620;font-size:14px}
+.est-accepted{margin-top:22px;padding:14px;border:1px solid #c7dcb0;border-radius:12px;background:#eef6e6}
 @media print{body{background:#fff}.wrap{padding:0}.est-card{border:0}.noprint{display:none}}
 </style>
 </head>
@@ -47,8 +53,27 @@ td small{display:block;color:#66736f;font-size:12px}.num{text-align:right;white-
     const client=supabase.createClient(cfg.url,cfg.key,{auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false}});
     const cloud=EsCloud.create(client);
     const data=await cloud.getSharedEstimate(token);
-    show(EsEstimateView.render(data),data&&data.estimate?'ok':'unavailable');
+    let acceptance=null;
+    if(data&&data.estimate){try{acceptance=await cloud.getEstimateAcceptance(token)}catch(e){acceptance=null}}
+    const paint=()=>show(EsEstimateView.render(data,acceptance),data&&data.estimate?'ok':'unavailable');
+    paint();
     if(data){const b=document.getElementById('printBtn');b.hidden=false;b.onclick=()=>print();}
+    document.addEventListener('submit',async ev=>{
+      const f=ev.target;if(!f||f.id!=='acceptForm')return;ev.preventDefault();
+      const name=(document.getElementById('acceptName').value||'').trim();
+      const note=(document.getElementById('acceptNote').value||'').trim();
+      const msg=document.getElementById('acceptMsg'),btn=document.getElementById('acceptBtn');
+      if(!name){msg.textContent='Please enter your name.';return}
+      btn.disabled=true;btn.textContent='Recording…';msg.textContent='';
+      try{
+        const r=await cloud.acceptSharedEstimate(token,name,note);
+        acceptance={accepted_name:r&&r.accepted_name||name,accepted_at:r&&r.accepted_at||new Date().toISOString()};
+        paint();
+      }catch(e){
+        btn.disabled=false;btn.textContent='Accept estimate';
+        msg.textContent=(e&&e.message)||'Could not record your acceptance. Please try again or contact Exotic Splash.';
+      }
+    });
   }catch(e){host.textContent='Could not load the estimate right now. Please try again later or contact Exotic Splash.';host.dataset.estimateState='error'}
 })();
 </script>
