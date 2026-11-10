@@ -33,6 +33,26 @@ function json(req: Request, status: number, body: unknown): Response {
   });
 }
 
+type RpcError = { message?: string; code?: string } | null;
+
+/** supabase-js 2.119 types rpc() from a generated Database. These calls are not in that generic, so the client is narrowed here. Runtime behavior is unchanged. */
+interface LooseClient {
+  rpc(fn: string, args?: Record<string, unknown>): Promise<{ data: Record<string, unknown> | null; error: RpcError }>;
+  auth: { getUser(): Promise<{ data: { user: { id: string } | null }; error: RpcError }> };
+  from(table: string): {
+    select(columns: string): {
+      eq(column: string, value: string | number): {
+        maybeSingle(): Promise<{ data: Record<string, unknown> | null; error: RpcError }>;
+        single(): Promise<{ data: Record<string, unknown> | null; error: RpcError }>;
+      };
+    };
+  };
+}
+
+function loose(client: unknown): LooseClient {
+  return client as LooseClient;
+}
+
 function rpcFail(error: { message?: string; code?: string }) {
   const msg = error?.message || "Request failed";
   const code = error?.code || "";
@@ -52,7 +72,7 @@ function rpcFail(error: { message?: string; code?: string }) {
   return { ok: false, status: 400, code: "bad_request", error: msg };
 }
 
-function discountStore(userClient: ReturnType<typeof createClient>) {
+function discountStore(userClient: LooseClient) {
   return {
     async request(_actor: unknown, input: Record<string, unknown>) {
       const { data, error } = await userClient.rpc("request_extra_discount", {
@@ -89,8 +109,8 @@ function discountStore(userClient: ReturnType<typeof createClient>) {
         p_mark_stale: input.markStale === true,
       });
       if (error) return rpcFail(error);
-      if (data && data.ok === false) return { ok: false, status: 409, code: data.code, error: data.error };
-      return { ok: true, status: 200, amount: data.amount, beforeTotal: data.beforeTotal, afterTotal: data.afterTotal, id: data.id, request: data };
+      if (data && data.ok === false) return { ok: false, status: 409, code: String(data.code || ""), error: String(data.error || "") };
+      return { ok: true, status: 200, amount: data?.amount, beforeTotal: data?.beforeTotal, afterTotal: data?.afterTotal, id: data?.id, request: data };
     },
     async consume(_actor: unknown, input: Record<string, unknown>) {
       const { data, error } = await userClient.rpc("bind_extra_discount", {
@@ -103,8 +123,8 @@ function discountStore(userClient: ReturnType<typeof createClient>) {
         p_mark_stale: true,
       });
       if (error) return rpcFail(error);
-      if (data && data.ok === false) return { ok: false, status: 409, code: data.code, error: data.error };
-      return { ok: true, status: 200, amount: data.amount, request: data };
+      if (data && data.ok === false) return { ok: false, status: 409, code: String(data.code || ""), error: String(data.error || "") };
+      return { ok: true, status: 200, amount: data?.amount, request: data };
     },
   };
 }
@@ -121,14 +141,15 @@ Deno.serve(async (req: Request) => {
   const auth = req.headers.get("Authorization") ?? "";
   if (!/^Bearer\s+\S+/.test(auth)) return json(req, 401, { ok: false, error: "Sign in required" });
 
-  const userClient = createClient(url, anon, {
+  const userClient = loose(createClient(url, anon, {
     global: { headers: { Authorization: auth } },
     auth: { persistSession: false, autoRefreshToken: false },
-  });
+  }));
   const { data: userData, error: userErr } = await userClient.auth.getUser();
-  if (userErr || !userData?.user) return json(req, 401, { ok: false, error: "Session invalid or expired" });
+  const userId = userData?.user?.id;
+  if (userErr || !userId) return json(req, 401, { ok: false, error: "Session invalid or expired" });
 
-  const adminClient = createClient(url, service, { auth: { persistSession: false, autoRefreshToken: false } });
+  const adminClient = loose(createClient(url, service, { auth: { persistSession: false, autoRefreshToken: false } }));
 
   let body: unknown;
   try { body = await req.json(); } catch { return json(req, 400, { ok: false, error: "Invalid JSON" }); }
@@ -138,8 +159,9 @@ Deno.serve(async (req: Request) => {
     async getProfile() {
       const { data, error } = await userClient.rpc("get_my_profile");
       if (error) throw error;
-      const p = Array.isArray(data) ? data[0] : data;
-      return p && p.id === userData.user.id ? p : null;
+      const row = Array.isArray(data) ? data[0] : data;
+      const p = row as { id?: string } | null;
+      return p && p.id === userId ? p : null;
     },
     async getJob(id: string) {
       const { data, error } = await userClient.from("jobs").select("id, version, job_data").eq("id", id).maybeSingle();
@@ -153,12 +175,12 @@ Deno.serve(async (req: Request) => {
       ]);
       if (e1) throw e1;
       if (e2) throw e2;
-      return { staff_settings: pb.staff_settings, owner_settings: pbo.owner_settings, version: pb.version };
+      return { staff_settings: pb?.staff_settings, owner_settings: pbo?.owner_settings, version: pb?.version };
     },
     async getJobMarkup(id: string) {
       const { data, error } = await adminClient.from("job_owner_pricing").select("markup_pct").eq("job_id", id).maybeSingle();
       if (error) throw error;
-      return data ? Number(data.markup_pct) : null;
+      return data && data.markup_pct != null ? Number(data.markup_pct) : null;
     },
     async recordQuote(args: Record<string, unknown>) {
       const { data, error } = await adminClient.rpc("server_record_quote", args);
