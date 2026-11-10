@@ -430,17 +430,15 @@ function summaryHTML(){
   <div class="summary-row"><span>Approved adjustment limit</span><strong>${adjCap?cash(adjCap):'$0'}</strong></div>
   <div class="summary-row"><span>Applied adjustment</span><strong>${cash(E.n(j.discount))}</strong></div>
   <button class="button secondary small" data-view="internal">Field plan / travel →</button></div>`;
-  const catalogPending=isCatalogJob(j)&&!x.quoteReady;
-  const floorIncomplete=!isCatalogJob(j)&&!x.quoteReady;
-  const pending=catalogPending;
+  const notFinal=!x.quoteReady;
+  const pending=notFinal;
+  const catalogPending=isCatalogJob(j)&&notFinal;
   const typeLabel={floor:'Measured floors',garage:'Garage',flatwork:'Tables / counters / bars',seating:'Chairs / stools'}[j.projectType]||j.projectType;
-  const totalBlock=catalogPending
-    ?`<div class="big-total pending-total">Pending</div><div class="per-sqft">Starting price needed · not a finalized quote</div>`
-    :floorIncomplete
-      ?`<div class="big-total">${cash(x.total)}</div><div class="per-sqft">Add measurements to calculate</div>`
-      :`<div class="big-total">${cash(x.total)}</div><div class="per-sqft">${x.sqft?cash(x.perSqft)+' / sq ft · '+num(x.sqft)+' sq ft total':(x.catalog?escape(x.catalog.startingLabel||'Catalog package'):'')}</div>`;
-  return `<div class="quote-summary"><span class="summary-label">${catalogPending?'QUOTE STATUS · PENDING':'CUSTOMER ESTIMATE'}</span>${totalBlock}<div class="summary-rule"></div>
-  ${catalogPending?priceNeededBanner(x):''}
+  const totalBlock=notFinal
+    ?`<div class="big-total pending-total">Pending</div><div class="per-sqft">${x.sqft||isCatalogJob(j)?'Not a finalized quote':'Add measurements to calculate'}</div>`
+    :`<div class="big-total">${cash(x.total)}</div><div class="per-sqft">${x.sqft?cash(x.perSqft)+' / sq ft · '+num(x.sqft)+' sq ft total':(x.catalog?escape(x.catalog.startingLabel||'Catalog package'):'')}</div>`;
+  return `<div class="quote-summary"><span class="summary-label">${notFinal?'QUOTE STATUS · PENDING':'CUSTOMER ESTIMATE'}</span>${totalBlock}<div class="summary-rule"></div>
+  ${notFinal?priceNeededBanner(x):''}
   ${[['Project type',escape(typeLabel)],['Price',escape(x.selected.short)],...(x.selected.key!=='regular'&&!pending?[['Savings vs regular',cash(x.selected.savings)+' ('+num(x.selected.savingsPct)+'%)']]:[]),['Property add-in',x.addOn.included?cash(x.addOn.total)+' @ '+cash(x.addOn.rate)+'/sq ft':'Not included'],['Areas / items',isCatalogJob(j)?String((j.catalogItems||[]).length||(j.projectType==='garage'?1:0)):j.areas.length],['Moisture areas',String((moistureSelectedAreas(j).items||[]).length)],['Cloud','OFF']].map(([k,v])=>`<div class="summary-row"><span>${k}</span><strong>${v}</strong></div>`).join('')}
   <p class="summary-note">${pending?'Unconfigured catalog jobs stay pending — never show a misleading $0 final as if priced.':'Quoted total is a blended customer price. Travel/mobilization (when calculated) is included in the total — not shown as a separate customer line.'}</p>
   <button class="button lime" data-step="review">Review & export ↗</button>
@@ -1305,8 +1303,8 @@ function internalContent(print=false){
   <section class="${print?'':'card'}" style="margin-top:16px"><h3>2. Material quantities ${owner?'& cost allowances':' (planning qty — $ owner-only)'}</h3>
   <p class="method-note">${escape((x.packBilling&&x.packBilling.wording)||'Whole packs are not added on top of an installed price.')}</p>
   ${owner
-    ? tableHTML(['Material','Required','Packs','Billed','Leftover','Owner pack $','Owner total'],(x.material||[]).map(m=>`<tr><td>${escape(m.label)}${m.packStatus==='unresolved'?'<small>Pack size unresolved — not invented</small>':''}</td><td class="num">${m.required==null?'—':num(m.required,2)+' '+(m.volumeUnit||'')}</td><td class="num">${m.packs==null?'—':num(m.packs,0)}</td><td class="num">${m.billedQty==null?'—':num(m.billedQty,2)}</td><td class="num">${m.leftover==null?'—':num(m.leftover,2)}</td><td class="num">${cash(m.unitPrice)}</td><td class="num">${cash(m.total)}</td></tr>`).concat([`<tr class="total-row"><td colspan="6">Materials (raw cost)</td><td class="num">${cash(x.mat)}</td></tr>`]))
-    : tableHTML(['Material','Required','Whole packs','Billed quantity'],(x.material||[]).map(m=>`<tr><td>${escape(m.label)}${m.packStatus==='unresolved'?'<small>Pack size unresolved</small>':''}</td><td class="num">${m.required==null?'—':num(m.required,2)}</td><td class="num">${m.packs==null?'—':num(m.packs,0)}</td><td class="num">${m.billedQty==null?'—':num(m.billedQty,2)}</td></tr>`))+`<p class="method-note">Purchase prices stay with the owner.</p>`}
+    ? tableHTML(['Material','Required','Packs','Billed','Leftover','Owner pack $','Owner total'],(x.material||[]).map(m=>`<tr><td>${escape(m.label)}${m.packStatus&&m.packStatus!=='ok'?'<small>'+escape(m.packReason||m.packStatus)+'</small>':''}</td><td class="num">${m.required==null?'—':num(m.required,2)+' '+escape(m.volumeUnit||'')}</td><td class="num">${m.packs==null?'—':num(m.packs,0)}</td><td class="num">${m.billedQty==null?'—':num(m.billedQty,2)+' '+escape(m.volumeUnit||'')}</td><td class="num">${m.leftover==null?'—':num(m.leftover,2)+' '+escape(m.volumeUnit||'')}</td><td class="num">${m.unitPrice==null?'Missing — not free':cash(m.unitPrice)}</td><td class="num">${m.total==null?'—':cash(m.total)}</td></tr>`).concat([`<tr class="total-row"><td colspan="6">Materials (raw cost)</td><td class="num">${x.costBlocked?'Blocked':cash(x.mat)}</td></tr>`]))
+    : tableHTML(['Material','Required','Whole packs','Billed quantity'],(x.material||[]).map(m=>`<tr><td>${escape(m.label)}${m.packStatus&&m.packStatus!=='ok'?'<small>Pack data unresolved</small>':''}</td><td class="num">${m.required==null?'—':num(m.required,2)+' '+escape(m.volumeUnit||'')}</td><td class="num">${m.packs==null?'—':num(m.packs,0)}</td><td class="num">${m.billedQty==null?'—':num(m.billedQty,2)+' '+escape(m.volumeUnit||'')}</td></tr>`))+`<p class="method-note">Purchase prices stay with the owner.</p>`}
   </section>
 
   <section class="${print?'':'card'}" style="margin-top:16px"><h3>3. Labor ${owner?'cost breakdown':'planned hours'}</h3>
@@ -1478,11 +1476,21 @@ function customerGuideDocument(){
   </article>`;
 }
 function containerCustomerHTML(x){
-  const note=(x.packBilling&&x.packBilling.wording)||'The installed price already includes materials. Whole packs are not added again.';
+  const pb=x.packBilling||{};
+  const note=pb.wording||'The installed price already includes materials. Whole packs are not added again.';
   const lines=x.material||[];
+  const unitOf=m=>m.volumeUnit||m.unit||'';
   if(!lines.length)return `<div class="notice"><b>Containers.</b> ${escape(note)}</div>`;
-  const rows=lines.map(m=>`<tr><td>${escape(m.label)}${m.packStatus==='unresolved'?'<small>Pack size unresolved — not invented</small>':''}</td><td class="num">${m.required==null?'—':num(m.required,2)}</td><td class="num">${m.packs==null?'—':num(m.packs,0)}</td><td class="num">${m.billedQty==null?'—':num(m.billedQty,2)}</td></tr>`);
-  return `<h4>Whole containers</h4><p class="method-note">${escape(note)} Required quantity, whole packs, and billed quantity are separate. No partial pack is charged.</p>${tableHTML(['Product','Required','Whole packs','Billed quantity'],rows)}`;
+  const rows=lines.map(m=>{
+    const req=m.required==null?'—':num(m.required,2)+' '+escape(unitOf(m));
+    const billed=m.billedQty==null?'—':num(m.billedQty,2)+' '+escape(unitOf(m));
+    const flag=m.packStatus==='unresolved'?'Pack size unresolved — not invented':m.packStatus==='missing-cost'?'Purchase cost missing — not free':'';
+    return `<tr><td>${escape(m.label)}${flag?'<small>'+escape(flag)+'</small>':''}</td><td class="num">${req}</td><td class="num">${m.packs==null?'—':num(m.packs,0)}</td><td class="num">${billed}</td></tr>`;
+  });
+  const cover=pb.covered&&pb.obligation!=null
+    ?`<p class="method-note">Full-pack material charge ${cash(pb.obligation)} is covered by the installed price. It is not a prorated fraction and it is not added again.</p>`
+    :`<div class="warn-banner"><b>Pack charge not finalized.</b> ${escape(note)}</div>`;
+  return `<h4>Whole containers</h4><p class="method-note">${escape(note)}</p>${cover}${tableHTML(['Product','Required','Whole packs','Billed quantity'],rows)}`;
 }
 function customerDocument(){
   const j=activeJob(),s=state.settings,x=calc(),b=s.business;

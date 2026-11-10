@@ -24,11 +24,60 @@ function wholePack(opts){
   const leftover=Math.round((billedQty-required)*1000)/1000;
   return {status:'ok',required,packSize,packs,billedQty,leftover,reason:packs+' whole pack'+(packs===1?'':'s')+' cover '+required+'. The billed quantity is '+billedQty+', not a prorated fraction.'};
 }
-/** Installed sq ft rates and catalog package starts already include materials. */
-function chargePolicy(mode){
-  if(mode==='package_inclusive')return {addToInstalledTotal:false,wording:'The package or per-item price already includes materials. Whole packs are not added again. Required container counts stay unresolved until a measured quantity is entered.'};
-  if(mode==='materials_only')return {addToInstalledTotal:false,conflict:'A separate materials-only pack charge is not added on top of an installed price in this draft.',wording:'Whole packs would be the materials-only quantity. They are not added again to an installed sq ft or package total.'};
-  return {addToInstalledTotal:false,wording:'The installed price already includes materials. A product sold by the full pack is billed as whole packs. That pack price is not added on top of the sq ft rate.'};
+function money(v){
+  if(v===null||v===undefined||v==='')return null;
+  const x=Number(v);
+  return Number.isFinite(x)?Math.round(x*100)/100:null;
 }
-return {wholePack,chargePolicy};
+/** Full-pack selling charge inside an inclusive installed total. Never added on top. Missing price is not $0. */
+function reconcile(opts){
+  opts=opts||{};
+  const lines=opts.lines||[];
+  const detail=[];
+  let obligation=0, missingPrice=false, unresolved=false, missingCost=false;
+  for(const line of lines){
+    const unit=line.unit||line.volumeUnit||'';
+    if(line.packStatus==='unresolved'||line.packStatus==='missing-cost'){
+      if(line.packStatus==='missing-cost')missingCost=true; else unresolved=true;
+      detail.push({key:line.key,status:line.packStatus,required:line.required,unit,packs:null,billedQty:null,fullCharge:null});
+      continue;
+    }
+    if(!line.packs)continue;
+    const price=money(line.customerPackPrice);
+    if(price==null||price<=0){
+      missingPrice=true;
+      detail.push({key:line.key,status:'missing-pack-price',required:line.required,unit,packs:line.packs,billedQty:line.billedQty,fullCharge:null,reason:'Pack selling price is missing. It is not treated as free and it is not prorated.'});
+      continue;
+    }
+    const full=money(line.packs*price);
+    const prorated=line.billedQty?money((line.required/line.billedQty)*full):null;
+    obligation=money(obligation+full);
+    detail.push({key:line.key,status:'full-pack',required:line.required,unit,packs:line.packs,billedQty:line.billedQty,fullCharge:full,proratedWouldHaveBeen:prorated});
+  }
+  const inclusive=money(opts.inclusiveTotal)||0;
+  const shortfall=money(obligation-inclusive);
+  const gap=shortfall!=null&&shortfall>0.009;
+  const blocked=!!(opts.enforce&&(missingPrice||unresolved||missingCost||gap)&&lines.some(l=>Number(l.required)>0));
+  const covered=!missingPrice&&!unresolved&&!missingCost&&!gap;
+  return {
+    addToInstalledTotal:false,
+    mode:opts.mode||'sqft_inclusive',
+    obligation:missingPrice||unresolved||missingCost?null:obligation,
+    inclusiveTotal:inclusive,
+    shortfall:gap?shortfall:0,
+    covered,
+    blocked,
+    missingPrice,unresolved,missingCost,
+    lines:detail,
+    wording:covered
+      ?'The installed price already includes materials. The customer material obligation is the full sellable pack, not a prorated fraction of that pack, and that full charge is covered by the installed total. It is not added again.'
+      :'The full sellable-pack charge is not covered, or the pack price or pack size is missing. It was not prorated and it was not treated as free. Finalize only after owner review.'
+  };
+}
+function chargePolicy(mode){
+  if(mode==='package_inclusive')return {addToInstalledTotal:false,mode,wording:'The package or per-item price already includes materials. A separate pack charge is not added. Measured container counts apply only when a quantity is entered.'};
+  if(mode==='materials_only')return {addToInstalledTotal:false,mode,conflict:'A second materials-only pack charge is not added on top of an installed price.',wording:'Whole packs are the materials quantity. They are not added again to an installed total.'};
+  return {addToInstalledTotal:false,mode,wording:'The installed price already includes materials. Billing uses the full pack, not a fraction of the pack, and that charge must be covered by the installed total.'};
+}
+return {wholePack,reconcile,chargePolicy};
 });

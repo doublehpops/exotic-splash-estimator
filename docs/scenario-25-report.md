@@ -1,39 +1,43 @@
-# 25-scenario review
+# 25 job scenarios
 
-Local engine and quote-core mock only. Not live access control and not a routed drive. The private evidence set is not loaded. These 25 rows do not mean every price is resolved or live.
+Each row is one estimator job. Pack microtests remain in tools/visibility-audit.test.js.
 
-Unresolved on purpose: garage sealer as a package preset, custom and critical scopes, package leveling, and a blank flatwork override. Unknown condition stays blocked pending inspection. Installer 250/450/650 sq ft figures are not Double package sizes and are not used. Required quantity, whole packs, and pack price are separate from source proof.
+Arithmetic pass and full-scenario pass are separate. A blocked incomplete zero is not a usable priced quote.
 
-Pass 25 / fail 0 / rows with a blocked or incomplete zero 8.
+Arithmetic pass: 25. Coverage pass: 25. Role pass: 25. Full scenario pass: 25. Fail: 0.
 
-| ID | Name | Locale | Result | Actual total | Note |
-| --- | --- | --- | --- | --- | --- |
-| S01 | floor-chicago-100-solid | Chicago, IL | pass | 800 |  |
-| S02 | floor-phoenix-100-solid | Phoenix, AZ | pass | 800 |  |
-| S03 | floor-chicago-250-flake | Chicago, IL | pass | 2500 |  |
-| S04 | floor-dallas-40-metallic | Dallas, TX | pass | 600 |  |
-| S05 | floor-chicago-zero-sqft | Chicago, IL | pass | 0 |  |
-| S06 | garage-1car-chicago-flake | Chicago, IL | pass | 1000 |  |
-| S07 | garage-2car-milwaukee-flake | Milwaukee, WI | pass | 2000 |  |
-| S08 | garage-3car-chicago-flake | Chicago, IL | pass | 3000 |  |
-| S09 | garage-sealer-preset-rejected | Chicago, IL | pass | 0 | Sealer package preset is blocked. The negative flat is not applied and the quote is not finalized at $0. |
-| S10 | garage-2car-sealer-would-zero | Chicago, IL | pass | 0 | A flat that would make the 2-car package $0 is not applied. Use measured sq ft at the sealer selling rate. |
-| S11 | garage-1car-unknown-condition | Chicago, IL | pass | 0 |  |
-| S12 | garage-measured-200-flake | Naperville, IL | pass | 2000 |  |
-| S13 | flatwork-small-chicago | Chicago, IL | pass | 400 | size-band start, blank override ignored |
-| S14 | flatwork-blank-override-austin | Austin, TX | pass | 0 | Optional flatwork override is blank and no size band matched for Odd. A blank override is not a missing package price. Choose a size band or enter an item override. The item stays  |
-| S15 | seating-two-chairs-chicago | Chicago, IL | pass | 360 | 2 × 180 |
-| S16 | seating-unknown-denver | Denver, CO | pass | 0 | Condition is Unknown for Stool. A fair adjustment is not applied. Inspection is required before this item can be finalized. |
-| S17 | pack-zero-usage | not a priced city | pass | — | No positive requirement, so no pack is billed. |
-| S18 | pack-two-of-three | not a priced city | pass | — | 1 whole pack cover 2. The billed quantity is 3, not a prorated fraction. |
-| S19 | pack-exact-three | not a priced city | pass | — | 1 whole pack cover 3. The billed quantity is 3, not a prorated fraction. |
-| S20 | pack-just-over-three | not a priced city | pass | — | 2 whole packs cover 3.01. The billed quantity is 6, not a prorated fraction. |
-| S21 | pack-two-exact-packs | not a priced city | pass | — | 2 whole packs cover 6. The billed quantity is 6, not a prorated fraction. |
-| S22 | pack-missing-size | not a priced city | pass | — | Sellable pack size is missing. No pack count was invented and it was not treated as zero. |
-| S23 | pack-unit-mismatch | not a priced city | pass | — | Required unit does not match the sellable pack unit. No conversion was invented. |
-| S24 | floor-two-areas-aggregated-primer | Chicago, IL | pass | 4000 | Two 1-gal needs share one 3-gal pack. Pack dollars are not added to the 4000 installed total. |
-| S25 | deposit-block-and-role-snapshots | Chicago, IL | pass | — | local mock only — not live RLS or a browser session |
+Usable priced quotes: 16. Blocked or incomplete zero totals: 6. Finalized zeros: 0.
 
-City labels do not change selling rates. S01 and S02 are the pair that shows that.
+Live browser employee login, customer token, and live deposit acceptance: UNTESTED.
+
+| ID | Job | Locale | Footprint | Sell expected | Sell actual | Finalized | Full pack charge | Covered | Zero class | Pass |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| S01 | chicago-floor-100-solid | Chicago, IL | 100 sq ft solid | 800 | 800 | true | 1 | true | nonzero | pass |
+| S02 | phoenix-floor-100-solid | Phoenix, AZ | 100 sq ft solid | 800 | 800 | true | 1 | true | nonzero | pass |
+| S03 | chicago-floor-250-flake | Chicago, IL | 250 sq ft flake | 2500 | 2500 | true | 1 | true | nonzero | pass |
+| S04 | dallas-floor-40-metallic | Dallas, TX | 40 sq ft metallic | 600 | 600 | true | 1 | true | nonzero | pass |
+| S05 | chicago-floor-zero-sqft | Chicago, IL | 0 sq ft | 0 | 0 | false |  | true | blocked-or-incomplete-zero | pass |
+| S06 | chicago-1car-flake | Chicago, IL | 1-car package | 1900 | 1900 | true |  |  | nonzero | pass |
+| S07 | milwaukee-2car-flake | Milwaukee, WI | 2-car package | 3150 | 3150 | true |  |  | nonzero | pass |
+| S08 | chicago-3car-flake | Chicago, IL | 3-car package | 4900 | 4900 | true |  |  | nonzero | pass |
+| S09 | chicago-1car-sealer-rejected | Chicago, IL | 1-car sealer preset | 0 | 0 | false |  |  | blocked-or-incomplete-zero | pass |
+| S10 | chicago-2car-flat-would-zero | Chicago, IL | 2-car with a flat that would zero 3150 | 0 | 0 | false |  |  | blocked-or-incomplete-zero | pass |
+| S11 | chicago-1car-unknown | Chicago, IL | 1-car unknown condition | 0 | 0 | false |  |  | blocked-or-incomplete-zero | pass |
+| S12 | naperville-measured-garage-200 | Naperville, IL | 200 sq ft measured garage | 2000 | 2000 | true | 1 | true | nonzero | pass |
+| S13 | chicago-flatwork-small | Chicago, IL | small band countertop | 400 | 400 | true |  |  | nonzero | pass |
+| S14 | austin-flatwork-blank-override | Austin, TX | no size band | 0 | 0 | false |  |  | blocked-or-incomplete-zero | pass |
+| S15 | chicago-two-chairs | Chicago, IL | 2 chairs | 360 | 360 | true |  |  | nonzero | pass |
+| S16 | denver-stool-unknown | Denver, CO | 1 stool | 0 | 0 | false |  |  | blocked-or-incomplete-zero | pass |
+| S17 | chicago-floor-2gal-of-3 | Chicago, IL | 100 sq ft plus 2 gal primer need | 800 | 800 | true | 90 | true | nonzero | pass |
+| S18 | chicago-floor-exact-3gal | Chicago, IL | 100 sq ft plus exact 3 gal | 800 | 800 | true | 90 | true | nonzero | pass |
+| S19 | chicago-floor-just-over-3gal | Chicago, IL | 100 sq ft plus 3.01 gal | 800 | 800 | true | 180 | true | nonzero | pass |
+| S20 | chicago-floor-6gal | Chicago, IL | 100 sq ft plus 6 gal | 800 | 800 | true | 180 | true | nonzero | pass |
+| S21 | chicago-floor-zero-primer-need | Chicago, IL | 100 sq ft and 0 gal primer override | 800 | 800 | true |  | true | nonzero | pass |
+| S22 | chicago-floor-missing-pack-size | Chicago, IL | 100 sq ft, primer pack size missing | 800 | 800 | false |  | false | nonzero | pass |
+| S23 | chicago-floor-missing-pack-price | Chicago, IL | 100 sq ft, primer pack selling price missing | 800 | 800 | false |  | false | nonzero | pass |
+| S24 | chicago-two-areas-one-primer-pack | Chicago, IL | two 250 sq ft solid areas | 4000 | 4000 | true | 1 | true | nonzero | pass |
+| S25 | chicago-floor-missing-purchase-cost | Chicago, IL | 100 sq ft, primer purchase cost missing | 800 | 800 | false |  | false | nonzero | pass |
+
+Inclusive installed prices are not increased by the pack charge. If the full pack selling charge is greater than the installed total, or the pack price is missing, the quote stays unfinalized.
 
 Command: `node tools/scenario-25.js`
