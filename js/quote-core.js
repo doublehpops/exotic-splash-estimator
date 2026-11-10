@@ -15,6 +15,7 @@ const CORE_VERSION='7.0.0';
 const clone=x=>JSON.parse(JSON.stringify(x));
 const STAFF_SECTIONS=['business','rates','pricingOptions','addOn','approvedAdjustment','catalog','notes'];
 const OWNER_SECTIONS=['products','costs'];
+function discountApi(){return (typeof globalThis!=='undefined'&&globalThis.EsDiscountApproval)||(typeof require==='function'?function(){try{return require('./discount-approval.js')}catch(e){return null}}():null)}
 
 /* identical semantics to guided-app.js merge(): only keys present in defaults are taken */
 function merge(target,source){for(const k of Object.keys(target)){if(source&&Object.prototype.hasOwnProperty.call(source,k)){if(target[k]&&typeof target[k]==='object'&&!Array.isArray(target[k])&&source[k]&&typeof source[k]==='object'&&!Array.isArray(source[k]))merge(target[k],source[k]);else target[k]=source[k]}}return target}
@@ -131,7 +132,9 @@ function staffWarnings(ws){return (ws||[]).filter(w=>!COST_WARNING.test(String(w
 function safeChoice(c){
   return{key:c.key,label:c.label,short:c.short,rate:n(c.rate),project:n(c.project),adjustment:n(c.adjustment),pre:n(c.pre),
     minimum:n(c.minimum),discount:n(c.discount),subtotal:n(c.subtotal),salesTax:n(c.salesTax),total:n(c.total),
-    savings:n(c.savings),savingsPct:n(c.savingsPct),pctTotal:n(c.pctTotal),
+    savings:n(c.savings),savingsPct:n(c.savingsPct),savingsBasis:c.savingsBasis||'full quote total',pctTotal:n(c.pctTotal),
+    breakdown:c.breakdown?{finishRate:n(c.breakdown.finishRate),finishQty:n(c.breakdown.finishQty),finishAmount:n(c.breakdown.finishAmount),extrasAmount:n(c.breakdown.extrasAmount),extras:(c.breakdown.extras||[]).map(e=>({label:String(e.label||''),amount:n(e.amount)})),total:n(c.total),reconciles:!!c.breakdown.reconciles}:null,
+    paymentsReconcile:c.paymentsReconcile!==false,
     payments:(c.payments||[]).map(p=>({pct:n(p.pct),label:String(p.label||''),amount:n(p.amount)}))};
 }
 function safeLine(l){return{kind:l.kind,label:l.label,description:l.description,qty:n(l.qty),unit:l.unit,rate:n(l.rate),total:n(l.total),pending:l.pending?true:undefined}}
@@ -197,7 +200,8 @@ function customerSnapshot(E,job,x,settings){
     totals:{base:n(x.base),adjustment:n(sel.adjustment),minimum:n(x.minimum),discount:n(x.discount),subtotal:n(x.subtotal),
       taxPct:n(job.tax),salesTax:n(x.salesTax),total:n(x.total),perSqft:n(x.perSqft)},
     selected:{key:sel.key||'regular',label:sel.label||'',short:sel.short||'',rate:n(sel.rate),payments:(sel.payments||[]).map(p=>({pct:n(p.pct),label:String(p.label||''),amount:n(p.amount)}))},
-    options:Object.values(x.choices||{}).map(c=>({key:c.key,label:c.label,rate:n(c.rate),total:n(c.total),savings:n(c.savings),savingsPct:n(c.savingsPct),
+    options:Object.values(x.choices||{}).map(c=>({key:c.key,label:c.label,rate:n(c.rate),total:n(c.total),savings:n(c.savings),savingsPct:n(c.savingsPct),savingsBasis:'full quote total',
+      finishAmount:n(c.breakdown&&c.breakdown.finishAmount),extrasAmount:n(c.breakdown&&c.breakdown.extrasAmount),reconciles:!!(c.breakdown&&c.breakdown.reconciles),paymentsReconcile:c.paymentsReconcile!==false,
       payments:(c.payments||[]).map(p=>({pct:n(p.pct),label:String(p.label||''),amount:n(p.amount)}))})),
     showOptions:!!((job.showOptions||sel.key!=='regular')&&x.sqft&&x.quoteReady),
     addOn:x.addOn&&x.addOn.included?{included:true,label:x.addOn.label||'',rate:n(x.addOn.rate)}:{included:false},
@@ -229,29 +233,81 @@ async function handleQuoteRequest(body,deps,E){
       throw new HttpError(403,'forbidden','Account is not active staff');
     const owner=profile.role==='owner';
     const mode=body&&body.mode;
-    if(mode!=='preview'&&mode!=='record')throw new HttpError(400,'bad_request','mode must be preview or record');
+    const discountModes=mode==='discount-request'||mode==='discount-decide';
+    if(mode!=='preview'&&mode!=='record'&&!discountModes)throw new HttpError(400,'bad_request','mode must be preview, record, discount-request, or discount-decide');
     const jobId=body.job_id||null;
     if(jobId!=null&&!/^[0-9a-f-]{36}$/i.test(String(jobId)))throw new HttpError(400,'bad_request','invalid job_id');
     let stored=null;
     if(jobId){stored=await deps.getJob(jobId);if(!stored)throw new HttpError(404,'not_found','Job not found or not accessible')}
-    if(mode==='record'&&!stored)throw new HttpError(400,'bad_request','record requires a saved job_id');
+    if((mode==='record'||mode==='discount-decide')&&mode==='record'&&!stored)throw new HttpError(400,'bad_request','record requires a saved job_id');
+    if(mode==='discount-decide'){
+      const store=deps.discountStore;
+      if(!store)throw new HttpError(503,'not_configured','Discount approval store is not configured');
+      const decided=store.decide({id:profile.id,role:profile.role},{id:body.id,decision:body.decision,amount:body.amount,percent:body.percent,estimateId:body.estimateId,ownerNote:owner?body.ownerNote:undefined,lowMarginException:body.lowMarginException===true});
+      if(!decided.ok)return{status:decided.status,body:{ok:false,code:decided.code,error:decided.error}};
+      return{status:200,body:{ok:true,mode,request:decided.request}};
+    }
     let jobData;
-    if(mode==='record')jobData=stored.job_data;
+    if(mode==='record')jobData=clone(stored.job_data||{});
     else{
-      if(!body.job_data||typeof body.job_data!=='object'||Array.isArray(body.job_data))throw new HttpError(400,'bad_request','job_data required');
-      if(JSON.stringify(body.job_data).length>2000000)throw new HttpError(413,'too_large','job_data too large (remove photos)');
-      jobData=jobForTransport(body.job_data);
+      const source=body.job_data||(stored&&stored.job_data);
+      if(!source||typeof source!=='object'||Array.isArray(source))throw new HttpError(400,'bad_request','job_data required');
+      if(JSON.stringify(source).length>2000000)throw new HttpError(413,'too_large','job_data too large (remove photos)');
+      jobData=jobForTransport(source);
       if(!owner)applyEmployeeLocks(jobData,stored?stored.job_data:null);
     }
+    const clientDiscount=n(jobData.discount);
+    const approvalId=jobData.discountApprovalId||body.discountApprovalId||null;
+    delete jobData.discountApproval;
+    jobData.discount=0;
     const pb=await deps.getPriceBook();
     const markup=stored?await deps.getJobMarkup(stored.id):null;
-    const {settings,job,x}=computeQuote(E,{jobData,staffSettings:pb.staff_settings,ownerSettings:pb.owner_settings,markupPct:markup});
+    let {settings,job,x}=computeQuote(E,{jobData,staffSettings:pb.staff_settings,ownerSettings:pb.owner_settings,markupPct:markup});
+    const DA=discountApi();
+    const enforce=!settings.discountApproval||settings.discountApproval.enforce!==false;
+    const estimateId=stored?stored.id:(job.id||jobId);
+    const tier=job.priceOption||'regular';
+    const revision=DA?DA.revisionOf(job,x.total):'';
+    let discountGate={applied:false,status:'none'};
+    if(mode==='discount-request'){
+      const store=deps.discountStore;
+      if(!store||!DA)throw new HttpError(503,'not_configured','Discount approval store is not configured');
+      const requested=store.request({id:profile.id,role:profile.role},{
+        estimateId,revision,tier,beforeTotal:x.total,
+        amount:body.amount,percent:body.percent,reason:body.reason
+      });
+      if(!requested.ok)return{status:requested.status,body:{ok:false,code:requested.code,error:requested.error,beforeTotal:r2(x.total),revision,tier}};
+      return{status:200,body:{ok:true,mode,request:requested.request,beforeTotal:r2(x.total),revision,tier,customerTotal:r2(x.total)}};
+    }
+    if(enforce&&approvalId){
+      const store=deps.discountStore;
+      if(!store)discountGate={applied:false,status:'not_configured',code:'not_configured'};
+      else{
+        const checked=store.check({id:approvalId,estimateId,revision,tier,beforeTotal:x.total,markStale:mode==='record'});
+        if(checked.ok){
+          job.discountApproval={ok:true,amount:checked.amount};
+          x=E.calculate(job,settings);
+          if(mode==='record'){
+            const consumed=store.consume({id:profile.id,role:profile.role},{id:approvalId,estimateId,revision,tier,beforeTotal:checked.beforeTotal});
+            if(!consumed.ok)return{status:consumed.status,body:{ok:false,code:consumed.code,error:consumed.error}};
+          }
+          discountGate={applied:true,status:'approved',amount:checked.amount,beforeTotal:checked.beforeTotal,afterTotal:r2(x.total)};
+        }else discountGate={applied:false,status:checked.code,code:checked.code,error:checked.error};
+      }
+    }else if(enforce&&clientDiscount>0){
+      discountGate={applied:false,status:'not_approved',code:'discount_not_approved',error:'An extra discount needs owner approval for this estimate revision and tier'};
+    }
+    if(mode==='record'&&enforce&&(clientDiscount>0||approvalId)&&!discountGate.applied){
+      return{status:422,body:{ok:false,code:discountGate.code||'discount_not_approved',error:discountGate.error||'Extra discount was not applied'}};
+    }
     const staff=staffSnapshot(E,job,x,settings);
-    const out={ok:true,mode,role:profile.role,coreVersion:CORE_VERSION,priceBookVersion:pb.version,jobVersion:stored?stored.version:null,staff};
+    staff.discountStatus=discountGate.status;
+    const out={ok:true,mode,role:profile.role,coreVersion:CORE_VERSION,priceBookVersion:pb.version,jobVersion:stored?stored.version:null,staff,discountStatus:discountGate.status};
     if(mode==='preview'&&!owner&&n(job.discount)>staff.cap+0.005&&(job.priceOption||'regular')==='regular')
       out.discountOverCap=true;
     if(mode==='record'){
       const customer=customerSnapshot(E,job,x,settings);
+      delete customer.ownerNote;delete customer.discountApproval;
       const internal=internalSnapshot(x,job.markup);
       const quoteId=await deps.recordQuote({
         p_job_id:stored.id,p_job_version:stored.version,p_requested_by:profile.id,p_engine_version:CORE_VERSION,
