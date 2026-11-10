@@ -374,7 +374,45 @@ function navFooter(j){
 function jobListHTML(){
   return `<div class="job-switcher">${state.jobs.map(j=>`<button type="button" class="job-chip ${j.id===state.activeJobId?'active':''}" data-switch-job="${j.id}"><b>${escape(j.customer||j.company||'Untitled lead')}${j.isSample?' · ILLUSTRATIVE SAMPLE':''}</b><small>${escape(j.address||'No address')} · ${escape(j.number)} · updated ${escape((j.updatedAt||'').slice(0,10))}</small></button>`).join('')}</div>`;
 }
-function calcLocal(){const j=ensureJob();syncPrepIntoEngineFields(j);const x=E.calculate(j,state.settings);clampJobDiscountToCap(j,x);if(E.n(j.discount)!==E.n(x.discount)){return E.calculate(j,state.settings);}return x;}
+function syncDiscountApproval(j){
+  const DA=window.EsDiscountApproval;const store=discountStore();
+  if(!j||!DA||!store||!j.discountApprovalId){if(j)j.discountApproval=null;return;}
+  const bare=Object.assign({},j,{discount:0,discountApproval:null});
+  const before=E.calculate(bare,state.settings);
+  const revision=DA.revisionOf(j,before.total);
+  const checked=store.check({id:j.discountApprovalId,estimateId:j.id,revision,tier:j.priceOption||'regular',beforeTotal:before.total,markStale:false});
+  j.discount=0;
+  j.discountApproval=checked.ok?{ok:true,amount:checked.amount}:null;
+}
+function requestExtraDiscount(){
+  const j=activeJob();const DA=window.EsDiscountApproval;const store=discountStore();
+  if(!DA||!store){toast('Approval tools are not loaded');return;}
+  j.discountApproval=null;j.discount=0;
+  const before=E.calculate(j,state.settings);
+  const revision=DA.revisionOf(j,before.total);
+  const amount=j.discountRequestAmount;
+  const percent=j.discountRequestPercent;
+  const res=store.request({id:isOwner()?'synthetic-owner':'synthetic-employee',role:isOwner()?'owner':'employee'},{
+    estimateId:j.id,revision,tier:j.priceOption||'regular',beforeTotal:before.total,
+    amount:amount===''||amount==null?null:amount,
+    percent:percent===''||percent==null?null:percent,
+    reason:j.discountRequestReason
+  });
+  if(!res.ok){toast(res.error);return;}
+  j.discountApprovalId=res.request.id;
+  toast('Request recorded. The customer total stays the same until the owner approves.');
+  render();
+}
+function decideExtraDiscount(decision){
+  if(!isOwner()){toast('Only the owner can approve or reject.');return;}
+  const j=activeJob();const store=discountStore();
+  if(!store||!j.discountApprovalId){toast('There is no request on this estimate.');return;}
+  const res=store.decide({id:'synthetic-owner',role:'owner'},{id:j.discountApprovalId,decision,estimateId:j.id});
+  if(!res.ok){toast(res.error);return;}
+  toast(decision==='approve'?'Approved for this revision and tier.':'Rejected. The customer total is unchanged.');
+  render();
+}
+function calcLocal(){const j=ensureJob();syncPrepIntoEngineFields(j);syncDiscountApproval(j);return E.calculate(j,state.settings);}
 const SERVER_FIELDS=['sqft','finished','levelArea','levelEquiv','lines','base','regularBase','discountable','discountSqft','choices','selected','addOn','discount','minimum','subtotal','salesTax','total','perSqft','balance','finalizedBlocked','personHours','hours','travelMiles','warnings','quoteReady','quoteStatus','pendingReasons'];
 const COST_FIELDS=['cost','profit','margin','mat','tax','labor','equip','overhead','overheadBase','contingency','travelCost','travelInQuote','direct'];
 function stripCosts(x){
@@ -438,7 +476,7 @@ function summaryHTML(){
       :`<div class="big-total">${cash(x.total)}</div><div class="per-sqft">${x.sqft?cash(x.perSqft)+' / sq ft · '+num(x.sqft)+' sq ft total':(x.catalog?escape(x.catalog.startingLabel||'Catalog package'):'')}</div>`;
   return `<div class="quote-summary"><span class="summary-label">${catalogPending?'QUOTE STATUS · PENDING':'CUSTOMER ESTIMATE'}</span>${totalBlock}<div class="summary-rule"></div>
   ${catalogPending?priceNeededBanner(x):''}
-  ${[['Project type',escape(typeLabel)],['Price',escape(x.selected.short)],...(x.selected.key!=='regular'&&!pending?[['Savings vs regular',cash(x.selected.savings)+' ('+num(x.selected.savingsPct)+'%)']]:[]),['Property add-in',x.addOn.included?cash(x.addOn.total)+' @ '+cash(x.addOn.rate)+'/sq ft':'Not included'],['Areas / items',isCatalogJob(j)?String((j.catalogItems||[]).length||(j.projectType==='garage'?1:0)):j.areas.length],['Moisture areas',String((moistureSelectedAreas(j).items||[]).length)],['Cloud','OFF']].map(([k,v])=>`<div class="summary-row"><span>${k}</span><strong>${v}</strong></div>`).join('')}
+  ${[['Project type',escape(typeLabel)],['Price',escape(x.selected.short)],...(x.selected.key!=='regular'&&!pending?[['Below the regular full total',cash(x.selected.savings)+' ('+num(x.selected.savingsPct)+'% of that full total)']]:[]),['Property add-in',x.addOn.included?cash(x.addOn.total)+' @ '+cash(x.addOn.rate)+'/sq ft':'Not included'],['Areas / items',isCatalogJob(j)?String((j.catalogItems||[]).length||(j.projectType==='garage'?1:0)):j.areas.length],['Moisture areas',String((moistureSelectedAreas(j).items||[]).length)],['Cloud','OFF']].map(([k,v])=>`<div class="summary-row"><span>${k}</span><strong>${v}</strong></div>`).join('')}
   <p class="summary-note">${pending?'Unconfigured catalog jobs stay pending — never show a misleading $0 final as if priced.':'Quoted total is a blended customer price. Travel/mobilization (when calculated) is included in the total — not shown as a separate customer line.'}</p>
   <button class="button lime" data-step="review">Review & export ↗</button>
   <p class="summary-note">${owner?'Internal cost and margin are owner-only and never appear on customer or subcontractor documents by default.':'Internal cost, margin, and profit stay owner-only. Worker preview shows approved prices and operational review only.'}</p></div>
@@ -781,7 +819,34 @@ function stepSelections(j){
   </section>`;
 }
 function optionCardsHTML(x){
-  return Object.values(x.choices).map(c=>`<button type="button" class="option-card ${x.selected.key===c.key?'active':''}" data-option="${c.key}" aria-pressed="${x.selected.key===c.key}"><span class="opt-name">${escape(c.label)}${x.selected.key===c.key?'<span class="pill">SELECTED</span>':''}</span><span class="opt-total">${cash(c.total)}</span><span class="opt-meta">${cash(c.rate)} / sq ft on ${num(x.discountSqft)} sq ft · option total ${cash(c.project)}</span>${c.key==='regular'?'<span class="opt-meta">Payment terms per job terms</span>':`<span class="opt-save">Saves ${cash(c.savings)} (${num(c.savingsPct)}%) vs regular</span><ul>${c.payments.map(p=>`<li>${cash(p.amount)} · ${num(p.pct)}% · ${escape(p.label)}</li>`).join('')}</ul>`}</button>`).join('');
+  const regularTotal=x.choices&&x.choices.regular?x.choices.regular.total:0;
+  return Object.values(x.choices).map(c=>{
+    const b=c.breakdown||{};
+    const extras=(b.extras||[]).map(e=>`<li>${escape(e.label)}: ${cash(e.amount)} <small>separate from the finish rate</small></li>`).join('');
+    const compared=c.key==='regular'?'<span class="opt-meta">Payment terms stay on the job terms. No extra schedule is added.</span>':`<span class="opt-save">${cash(c.savings)} below the regular full total of ${cash(regularTotal)} (${num(c.savingsPct)}% of that full total)</span>`;
+    const pays=(c.payments||[]).length?`<ul>${c.payments.map(p=>`<li>${cash(p.amount)} · ${num(p.pct)}% of ${cash(c.total)} · ${escape(p.label)}</li>`).join('')}</ul>`:'';
+    return `<button type="button" class="option-card ${x.selected.key===c.key?'active':''}" data-option="${c.key}" aria-pressed="${x.selected.key===c.key}"><span class="opt-name">${escape(c.label)}${x.selected.key===c.key?'<span class="pill">SELECTED</span>':''}</span><span class="opt-total">${cash(c.total)}</span><span class="opt-meta">Finish ${cash(b.finishRate)} / sq ft × ${num(b.finishQty)} sq ft = ${cash(b.finishAmount)}</span>${c.payMethod?`<span class="opt-meta">${escape(c.payMethod)}</span>`:''}${extras?`<ul>${extras}</ul>`:''}${compared}${pays}</button>`;
+  }).join('');
+}
+function discountStore(){
+  const DA=window.EsDiscountApproval;
+  if(!DA)return null;
+  if(!state.discountStore)state.discountStore=DA.createStore();
+  return state.discountStore;
+}
+function discountRequestHTML(j,x){
+  const owner=isOwner();
+  const store=discountStore();
+  const row=store&&j.discountApprovalId?store.get(j.discountApprovalId):null;
+  const applied=!!(j.discountApproval&&j.discountApproval.ok);
+  const status=applied?'approved':(row?row.status:'none');
+  const ask=`<div class="fields three">${field('Extra discount amount ($)','job.discountRequestAmount','number','Dollars off the selected tier. Leave blank to use a percent.')}${field('Or percent (%)','job.discountRequestPercent','number','Use one, not both.')}${field('Reason','job.discountRequestReason','text','Required. Shown on the approval record.')}</div>
+  <button type="button" class="button secondary" id="requestExtraDiscount">Request owner approval</button>`;
+  const review=owner&&row&&row.status==='pending'?`<div class="inline-actions"><button type="button" class="button" id="approveExtraDiscount">Approve request</button><button type="button" class="button secondary" id="rejectExtraDiscount">Reject request</button></div>`:'';
+  return `<div class="divider"></div><h4 style="margin:0 0 8px;font-size:13px">Extra discount</h4>
+  <p class="method-note">The selected tier is the price. An extra reduction is not included until the owner approves this estimate revision and tier. Pending and rejected requests leave the customer total unchanged. ${authMode()?'':'This browser preview is not the live server.'}</p>
+  <div class="info-banner"><b>Status:</b> ${escape(status)}${row?` · requested ${cash(row.amount)} · before ${cash(row.beforeTotal)} · after ${cash(row.afterTotal)}`:''}${applied?` · applied ${cash(j.discountApproval.amount)}`:''}</div>
+  ${ask}${review}`;
 }
 function travelFormulaHTML(x){
   const t=x.travel;const owner=isOwner();
@@ -912,15 +977,16 @@ function stepPricing(j){
   return `<section class="card">${cardHead('05','Customer pricing & payments','Options · add-in · terms — travel stays internal / blended')}
   ${priceNeededBanner(x)}
   ${catalog?`<div class="notice"><b>Catalog package pricing:</b> family per-sq-ft options apply to measured floor jobs. Package jobs use configured starting price + itemized adjustments (Regular). Material/topcoat/condition adjustments must be configured to affect price — not description only.</div>${catalogBreakdownDocHTML(x)}`:`<div id="optionCards" class="option-grid">${optionCardsHTML(x)}</div>`}
-  <div class="fields three">${select('Selected price','job.priceOption',catalog?[['regular','Regular (catalog starting + adjustments)']]:[['regular','Regular retail'],['opt1','Option 1 · 3 payments'],['opt2','Option 2 · 2 payments']])}${select('Document type','job.docType',[['estimate','Estimate'],['invoice','Invoice']])}${field('Customer sales tax (%)','job.tax','number')}</div>
+  <div class="fields three">${select('Selected price','job.priceOption',catalog?[['regular','Regular (catalog starting + adjustments)']]:[['regular','Regular · 7 / 10 / 15'],['opt1','Option 1 · bank transfer 5 / 8 / 11'],['opt2','Option 2 · 6 / 9 / 13']])}${select('Document type','job.docType',[['estimate','Estimate'],['invoice','Invoice']])}${field('Customer sales tax (%)','job.tax','number')}</div>
   ${checkbox('Show all pricing options on the customer document','job.showOptions')}
   <div class="divider"></div>
   ${checkbox('Include standard property / trip add-in','job.addOnIncluded')}
-  <div class="fields">${select('Add-in rate','job.addOnTier',[['low','$'+E.n(state.settings.addOn.low).toFixed(2)+' / sq ft (standard)'],['high','$'+E.n(state.settings.addOn.high).toFixed(2)+' / sq ft']],'Default on new jobs: included at $1/sq ft.')}
+  <p class="method-note">The $1 / sq ft property add-in is off on a new estimate until this box is checked. It is then its own line, not part of the finish rate. It is not a material surcharge.</p>
+  <div class="fields">${select('Add-in rate','job.addOnTier',[['low','$'+E.n(state.settings.addOn.low).toFixed(2)+' / sq ft (standard)'],['high','$'+E.n(state.settings.addOn.high).toFixed(2)+' / sq ft']],'Used only when the add-in box is checked. A new estimate leaves that box off.')}
   ${select('Customer pricing method','job.method',[['rates','Customer rates per square foot'],['cost','Estimated cost + markup'],['agreed','Agreed total / manual quote']])}
-  ${(()=>{const owner=isOwner();const x0=x;const cap=approvedAdjustmentCap(x0);clampJobDiscountToCap(j,x0);if(j.method==='cost')return owner?field('Markup on estimated cost (%)','job.markup','number'):lockedField('Markup on estimated cost (%)','job.markup','number','Owner-only');if(j.method==='agreed')return owner?field('Agreed total before discount / tax','job.agreedTotal','number'):lockedField('Agreed total before discount / tax','job.agreedTotal','number','Owner-only');const helpOwner='Regular only; ignored under family options. Employee approved adjustment limit: '+approvedAdjustmentLabel()+'.';const helpWorker=cap?('Within approved adjustment limit of '+cash(cap)+' (owner-set). Regular price only; ignored under family options.'):'Approved adjustment limit is $0 unless the owner sets one. Regular price only.';return owner?field('Approved adjustment / discount ($)','job.discount','number',helpOwner):field('Approved adjustment ($)','job.discount','number',helpWorker);})()}
+  ${(()=>{const owner=isOwner();if(j.method==='cost')return owner?field('Markup on estimated cost (%)','job.markup','number'):lockedField('Markup on estimated cost (%)','job.markup','number','Owner-only');if(j.method==='agreed')return owner?field('Agreed total before discount / tax','job.agreedTotal','number'):lockedField('Agreed total before discount / tax','job.agreedTotal','number','Owner-only');return '';})()}
+  ${catalog?'':discountRequestHTML(j,x)}
   ${quoteAllocationHTML(x)}
-  <div class="info-banner"><b>Approved adjustment limit:</b> ${approvedAdjustmentLabel()} · applied now ${cash(E.n(j.discount))}. Cap is owner-set and is <b>not</b> derived from profit or margin.</div>
   ${j.docType==='invoice'?field('Payments received ($)','job.paid','number'):''}
   </div>
   <p class="method-note">Family option rates replace the finish-area rate only. Leveling, removal, patching, moisture, and property add-in stay at normal amounts. Travel is calculated from the job address (Internal) and <b>blended into the customer total</b> — not listed as a separate customer line.</p>
@@ -1000,7 +1066,7 @@ function ratesView(){
   +`<div class="rate-banner"><span>◉</span><p><b>${authMode()?(owner?'Owner — edits are a draft until you save the price book to the server.':'Employee — rate book set by the owner (server-enforced).'):(owner?'Owner preview — rates editable in this demo.':'Worker preview — rate book locked.')}</b> ${owner?(authMode()?'Draft changes update estimates on this screen; employees and customer links use the saved server version.':'Changing numbers here updates estimates in this browser only.'):'Workers enter job details and create estimates using approved rates; they cannot change product prices, labor, travel, equipment, or overhead rates. Profit and margin stay owner-only.'}</p></div>
   ${authMode()?(runtime.priceBookPanelHTML?runtime.priceBookPanelHTML():''):`<div class="warn-banner"><b>OFFLINE DEMO — NOT SECURE.</b> <b>Preview only — not security.</b> This OWNER/WORKER switch demonstrates UX in a local HTML file. It is <b>not</b> authenticated access control. Real owner-only enforcement requires authenticated deployment with server-side authorization. No sign-in service is configured.</div>`}
   <details open><summary>Customer selling rates ${owner?'':'🔒'}</summary><div class="detail-body"><div class="fields three">${Object.entries({solid:'Solid epoxy / sq ft',flake:'Flake epoxy / sq ft',metallic:'Metallic epoxy / sq ft',sealer:'Clear seal / sq ft',level:'Leveling / sq ft at ¼ inch',removal:'Extra removal / sq ft',patch:'Patch / kit installed',moisture:'Moisture control / sq ft',extraCoat:'Additional solid base coat / sq ft',mediumFlakeExtra:'Medium flake premium / sq ft',fullFlakeExtra:'Full flake premium / sq ft'}).map(([k,v])=>lockedField(v,'settings.rates.'+k,'number')).join('')}</div></div></details>
-  <details open><summary>Family pricing options & property add-in ${owner?'':'🔒'}</summary><div class="detail-body"><p>Options never stack. Option rate replaces finish-area rate only.</p>${['opt1','opt2'].map(k=>`<div class="fields three" style="margin-bottom:14px">${lockedField('Option label','settings.pricingOptions.'+k+'.label')}${lockedField('Rate / sq ft ($)','settings.pricingOptions.'+k+'.rate','number')}${state.settings.pricingOptions[k].schedule.map((p,i)=>lockedField('Payment '+(i+1)+' %','settings.pricingOptions.'+k+'.schedule.'+i+'.pct','number')).join('')}</div>`).join('')}
+  <details open><summary>Payment tiers & property add-in ${owner?'':'🔒'}</summary><div class="detail-body"><p>Regular is 7 / 10 / 15. Option 1 is bank transfer, 5 / 8 / 11, half at booking and half at the final walkthrough. Option 2 is 6 / 9 / 13, with 50%, 25%, and 25% within 14 days. Tiers do not stack and there is no extra 40% off. Prep and removal stay at their own prices. No material surcharge is added.</p>${['opt1','opt2'].map(k=>`<div class="fields three" style="margin-bottom:14px">${lockedField('Option label','settings.pricingOptions.'+k+'.label')}${lockedField('Solid / sq ft','settings.pricingOptions.'+k+'.rates.solid','number')}${lockedField('Flake / sq ft','settings.pricingOptions.'+k+'.rates.flake','number')}${lockedField('Metallic / sq ft','settings.pricingOptions.'+k+'.rates.metallic','number')}${state.settings.pricingOptions[k].schedule.map((p,i)=>lockedField((p.label||('Payment '+(i+1)))+' %','settings.pricingOptions.'+k+'.schedule.'+i+'.pct','number')).join('')}</div>`).join('')}
   <div class="fields three">${lockedField('Property add-in label','settings.addOn.label')}${lockedField('Standard add-in / sq ft ($)','settings.addOn.low','number')}${lockedField('Higher add-in / sq ft ($)','settings.addOn.high','number')}</div></div></details>
   ${authMode()&&!owner?'<div class="info-banner es-costs-hidden"><b>Internal costs are owner-only.</b> Materials, labor, travel, equipment and overhead costs, markup, profit and margin are not sent to employee devices.</div>':`<details><summary>Materials, labor, travel, equipment, overhead ${owner?'':'🔒'}</summary><div class="detail-body"><div class="fields three">${lockedCField('Loaded labor / person-hour ($)','labor')}${lockedCField('Vehicle cost / mile ($)','mile','ONE mileage rate ($0.85). Travel folds into internal overhead.')}${lockedCField('Material waste (%)','waste')}${lockedCField('Business overhead / job ($)','overhead')}${lockedCField('Contingency reserve (%)','contingency')}${lockedCField('Grinder + extractor / day ($)','rentalDay')}${lockedCField('Diamond tooling allowance ($)','tooling')}${lockedCField('Supplies allowance ($)','supplies')}${lockedCField('Dust bags / filters ($)','dust')}${lockedCField('Disposal allowance ($)','disposal')}</div>
   <p class="method-note">Product package sizes and coverages are planning allowances. Travel + equipment costs fold into internal overhead; customers never see separate equipment or mileage lines.</p>
@@ -1293,7 +1359,12 @@ function internalView(){const owner=isOwner();return heading('PRIVATE',owner?'In
 
 function docOptionsHTML(x){
   return `<div class="doc-terms"><h4>Pricing & payment options</h4><p>Alternative options, not combined charges. Property add-in is the same under every option. Travel and equipment stay in internal overhead — not separate customer lines.</p></div>`
-    +tableHTML(['Option','Rate','Total','Savings / payments'],Object.values(x.choices).map(c=>`<tr class="${x.selected.key===c.key?'selected':''}"><td><b>${escape(c.label)}</b>${x.selected.key===c.key?'<small>☑ Selected</small>':'<small>☐ Not selected</small>'}</td><td class="num">${cash(c.rate)} / sq ft</td><td class="num">${cash(c.total)}</td><td class="num">${c.key==='regular'?'—':`Saves ${cash(c.savings)} (${num(c.savingsPct)}%)<small>${c.payments.map(p=>cash(p.amount)+' '+escape(p.label.toLowerCase())).join('<br/>')}</small>`}</td></tr>`)).replace('<table>','<table class="doc-options">');
+    +tableHTML(['Option','Finish','Full total','Compared with regular / payments'],Object.values(x.choices).map(c=>{
+      const b=c.breakdown||{};
+      const extraBits=(b.extras||[]).map(e=>escape(e.label)+' '+cash(e.amount)).join('<br/>');
+      const pays=(c.payments||[]).map(p=>cash(p.amount)+' '+escape(p.label)).join('<br/>');
+      return `<tr class="${x.selected.key===c.key?'selected':''}"><td><b>${escape(c.label)}</b>${x.selected.key===c.key?'<small>Selected</small>':''}</td><td class="num">${cash(b.finishRate)} / sq ft × ${num(b.finishQty)} = ${cash(b.finishAmount)}</td><td class="num">${cash(c.total)}</td><td class="num">${c.key==='regular'?'Full total used as the comparison':cash(c.savings)+' below the regular full total ('+num(c.savingsPct)+'% of that total)'}${extraBits?'<small>'+extraBits+'</small>':''}${pays?'<small>'+pays+'</small>':''}</td></tr>`;
+    })).replace('<table>','<table class="doc-options">');
 }
 function jobSelectionFlags(j){
   const areas=j.areas||[];
@@ -1413,13 +1484,16 @@ function customerDocument(){
     return `• ${escape(a.name)}: condition ${escape(a.conditionRating||'unknown')}${items.length?' — '+items.map(escape).join(', '):''}${a.conditionNotes?' — '+escape(a.conditionNotes):''}`;
   }).join('<br/>');
   const totalBlock=x.quoteReady
-    ?`<div class="doc-total"><div><span>${x.selected.key==='regular'?'Subtotal':'Regular price subtotal'}</span><span>${cash(x.base)}</span></div>${x.selected.key!=='regular'?`<div><span>${escape(x.selected.short)} @ ${cash(x.selected.rate)}/sq ft</span><span>${x.selected.adjustment<=0?'−':'+'}${cash(Math.abs(x.selected.adjustment))}</span></div>`:''}${x.minimum?`<div><span>Minimum project adjustment</span><span>${cash(x.minimum)}</span></div>`:''}${x.discount?`<div><span>Approved adjustment</span><span>−${cash(x.discount)}</span></div>`:''}${x.salesTax?`<div><span>Sales tax (${num(j.tax)}%)</span><span>${cash(x.salesTax)}</span></div>`:''}<div class="grand"><span>Total ${j.docType==='invoice'?'price':'estimate'}</span><span>${cash(x.total)}</span></div>${x.sqft?`<div><span>Blended installed rate*</span><span>${cash(x.perSqft)} / sq ft</span></div>`:''}${x.selected.key!=='regular'?`<div><span>Savings vs regular price</span><span>${cash(x.selected.savings)} (${num(x.selected.savingsPct)}%)</span></div>`:''}</div>`
+    ?`<div class="doc-total">${x.selected.breakdown?`<div><span>Finish</span><span>${cash(x.selected.breakdown.finishAmount)}</span></div><div><span>Separate extras</span><span>${cash(x.selected.breakdown.extrasAmount)}</span></div>`:''}${x.minimum?`<div><span>Minimum project adjustment</span><span>${cash(x.minimum)}</span></div>`:''}${x.discount?`<div><span>Approved extra discount</span><span>−${cash(x.discount)}</span></div>`:''}${x.salesTax?`<div><span>Sales tax (${num(j.tax)}%)</span><span>${cash(x.salesTax)}</span></div>`:''}<div class="grand"><span>Total ${j.docType==='invoice'?'price':'estimate'}</span><span>${cash(x.total)}</span></div><p class="method-note">A previously saved customer quote is not changed by opening this screen.</p>${x.sqft?`<div><span>Blended installed rate*</span><span>${cash(x.perSqft)} / sq ft</span></div>`:''}${x.selected.key!=='regular'?`<div><span>Below the regular full total</span><span>${cash(x.selected.savings)} (${num(x.selected.savingsPct)}% of that full total)</span></div>`:''}</div>`
     :`<div class="doc-total"><div class="grand"><span>Total ${j.docType==='invoice'?'price':'estimate'}</span><span class="pending-total">Pending — starting price needed</span></div><div><span>Status</span><span>Incomplete / not finalized</span></div></div>`;
   return `<article class="document">${j.isSample?'<div class="sample-banner"><b>ILLUSTRATIVE SAMPLE DATA</b></div>':''}
   ${!x.quoteReady?`<div class="warn-banner"><b>Starting price needed</b> — this document is not a finalized customer quote. Required price-book inputs are unconfigured.</div>`:''}
   <div class="doc-top"><div><div class="doc-brand">${escape(b.name)}</div><div class="doc-contact">${escape(b.address)}<br/>${escape(b.phone)}${b.email?'<br/>'+escape(b.email):''}</div></div><div class="doc-title"><h2>${j.docType==='invoice'?'Invoice':'Estimate'}${x.quoteReady?'':' (pending)'}</h2><p>${escape(j.number)}<br/>${escape(j.date)}</p></div></div>
   <div class="doc-client"><div><span class="doc-caption">Prepared for</span><b>${escape(j.customer||j.company||'Customer to be confirmed')}</b>${j.customer&&j.company?'<br/>'+escape(j.company):''}${j.email?'<br/>'+escape(j.email):''}${j.phone?'<br/>'+escape(j.phone):''}</div><div><span class="doc-caption">Project location</span>${escape(j.address||'Address to be confirmed')}<br/><b>${catalog?(j.projectType+' · '+(j.garagePackage||((j.catalogItems||[]).length+' item(s)'))):(num(x.sqft)+' sq ft total')}</b></div></div>
-  ${catalog?catalogBreakdownDocHTML(x):tableHTML(['Work / scope','Quantity','Rate','Amount'],vis.map(a=>`<tr><td><b>${escape(a.label)}</b><small>${escape(a.description)}</small></td><td class="num">${num(a.qty)} ${escape(a.unit)}</td><td class="num">${cash(a.rate)}</td><td class="num">${cash(a.total)}</td></tr>`))}
+  ${catalog?catalogBreakdownDocHTML(x):(x.selected&&x.selected.breakdown?tableHTML(['Work / scope','Quantity','Rate','Amount'],[
+    `<tr><td><b>Finish · ${escape(x.selected.short)}</b><small>This rate × quantity is the finish portion of the total below.</small></td><td class="num">${num(x.selected.breakdown.finishQty)} sq ft</td><td class="num">${cash(x.selected.breakdown.finishRate)}</td><td class="num">${cash(x.selected.breakdown.finishAmount)}</td></tr>`,
+    ...(x.selected.breakdown.extras||[]).map(e=>`<tr><td><b>${escape(e.label)}</b><small>Separate from the finish rate. Not a material surcharge.</small></td><td class="num">${num(e.qty)} ${escape(e.unit||'')}</td><td class="num">${cash(e.rate)}</td><td class="num">${cash(e.amount)}</td></tr>`)
+  ]):tableHTML(['Work / scope','Quantity','Rate','Amount'],vis.map(a=>`<tr><td><b>${escape(a.label)}</b><small>${escape(a.description)}</small></td><td class="num">${num(a.qty)} ${escape(a.unit)}</td><td class="num">${cash(a.rate)}</td><td class="num">${cash(a.total)}</td></tr>`)))}
   ${totalBlock}
   ${x.quoteReady?quoteAllocationHTML(x,{customer:true}):''}
   ${(j.showOptions||x.selected.key!=='regular')&&x.sqft&&x.quoteReady?docOptionsHTML(x):''}
@@ -1745,7 +1819,7 @@ document.addEventListener('click',e=>{
   if(t.dataset.step)goStep(t.dataset.step);
   if(t.dataset.print)printDocument(t.dataset.print);
   if(t.dataset.exportHtml)exportHTML(t.dataset.exportHtml);
-  if(t.dataset.option){activeJob().priceOption=t.dataset.option;render()}
+  if(t.dataset.option){const j=activeJob();j.priceOption=t.dataset.option;j.discountApproval=null;render()}
   if(t.dataset.style){const a=activeJob().areas[Number(t.dataset.index)];a.style=t.dataset.style;a.rate=null;render()}
   if(t.dataset.rating){const a=activeJob().areas[Number(t.dataset.areaIndex)];a.conditionRating=t.dataset.rating;pushHistory(activeJob(),'condition',a.name+' rated '+t.dataset.rating);render()}
   if(t.dataset.removeArea!==undefined){activeJob().areas.splice(Number(t.dataset.removeArea),1);render()}
@@ -1783,6 +1857,9 @@ document.addEventListener('click',e=>{
     case'roleOwner':if(authMode())break;state.role='owner';render();toast('Owner preview — rates editable in this demo. Not secure auth.');break;
     case'roleWorker':if(authMode())break;state.role='worker';render();toast('Worker preview — rate book locked. Not secure auth.');break;
     case'helpBtn':$('helpDialog').showModal();break;
+    case'requestExtraDiscount':requestExtraDiscount();break;
+    case'approveExtraDiscount':decideExtraDiscount('approve');break;
+    case'rejectExtraDiscount':decideExtraDiscount('reject');break;
   }
   if(t.classList.contains('dialog-close'))$('helpDialog').close();
 });
