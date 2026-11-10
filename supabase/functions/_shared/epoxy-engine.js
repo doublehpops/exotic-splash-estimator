@@ -212,16 +212,18 @@ function emptyResult(overrides){
   return Object.assign({sqft:0,finished:0,levelArea:0,levelEquiv:0,material:[],mat:0,tax:0,hours:[],labor:0,equipment:[],equip:0,direct:0,overhead:0,overheadBase:0,overheadItems:[],contingency:0,cost:0,lines:[],base:0,regularBase:0,discountable:0,discountSqft:0,choices:{regular:sel},selected:sel,addOn:{label:'',tier:'low',rate:0,included:false,total:0},travel:tr,travelCost:0,travelInQuote:0,crew:3,discount:0,minimum:0,subtotal:0,salesTax:0,total:0,profit:0,margin:0,perSqft:0,travelMiles:0,personHours:0,balance:0,warnings:[],quoteReady:false,quoteStatus:'incomplete',pendingReasons:[],catalog:null,finalizedBlocked:true},overrides||{});
 }
 
-function appliedExtraDiscount(job,settings,pre,isOption){
+function appliedExtraDiscount(job,settings,pre,choiceKey){
   const flag=settings&&settings.discountApproval;
   const enforce=!flag||flag.enforce!==false;
   const room=Math.max(0,n(pre));
+  const key=typeof choiceKey==='string'?choiceKey:'';
   if(!enforce){
-    if(isOption)return 0;
+    if(key&&key!=='regular')return 0;
     return Math.min(room,Math.max(0,n(job&&job.discount)));
   }
   const gate=job&&job.discountApproval;
   if(!gate||gate.ok!==true)return 0;
+  if(!gate.tier||gate.tier!==key)return 0;
   const amt=n(gate.amount);
   if(!(amt>0)||!(room>amt))return 0;
   return r2(amt);
@@ -272,7 +274,7 @@ function calculateCatalog(job,settings){
   const lineSum=lines.reduce((s,x)=>s+n(x.total),0);
   const discountable=br.startingTotal; /* adjustments stay; discount applies to starting scope similar to finish */
   const regularBase=lineSum+travelInQuote;
-  const discount=appliedExtraDiscount(job,settings,regularBase,false);
+  const discount=appliedExtraDiscount(job,settings,regularBase,'regular');
   const minimum=0;
   const pre=regularBase;
   const subtotal=br.quoteReady?Math.max(0,pre+minimum-discount):0;
@@ -374,7 +376,7 @@ function calculate(job,settings){
   else{project=discountable;rateShown=discountSqft?discountable/discountSqft:0;}
   const adjustment=project-discountable,pre=regularBase+adjustment;
   const minimum=sqft?Math.max(0,n(c.minimum)-pre):0;
-  const discount=appliedExtraDiscount(job,settings,pre+minimum,!!opt);
+  const discount=appliedExtraDiscount(job,settings,pre+minimum,key);
   const subtotal=Math.max(0,pre+minimum-discount),salesTax=subtotal*n(job.tax)/100,total=subtotal+salesTax;
   const sched=opt&&Array.isArray(opt.schedule)?opt.schedule:[];
   let paid=0;

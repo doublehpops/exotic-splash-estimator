@@ -119,7 +119,7 @@ async function enterApp(){
     const jobs=rows.map(r=>rowToJob(r,owner?markups[r.id]:undefined,settings));
     applyOutbox(profile.id,jobs);
     rt={mode:'auth',profile,settings,jobs,priceBook:{version:pb?pb.version:null,updatedAt:pb?pb.updated_at:null,ownerEmpty:owner?isEmptyBook(pb):null,sig:owner?bookSig(settings):null},
-      syncStatus:'connected',onSave,requestPreview,onClick,priceBookPanelHTML,sharePanelHTML,staffViewHTML,jobsExtraHTML,shares:{},newShare:null,staffList:null,audit:null,localScan:null};
+      syncStatus:'connected',onSave,requestPreview,discountCall,onClick,priceBookPanelHTML,sharePanelHTML,staffViewHTML,jobsExtraHTML,shares:{},newShare:null,staffList:null,audit:null,localScan:null};
     $('gate').hidden=true;$('appRoot').hidden=false;
     D.body.classList.add('mode-auth');D.body.classList.remove('mode-demo');
     decorateShell();
@@ -221,8 +221,12 @@ function toast(m){const g=G();if(g&&g.toast)g.toast(m);else W.alert(m)}
 
 /* ------------------------------------------------------------------ server quote preview (employees) */
 let previewTimer=null,previewKey=null,previewBusy=false,lastPreviewError=null;
-function requestPreview(j,key){
-  if(!rt||previewKey===key)return;
+async function discountCall(body){
+  body=body||{};
+  return cloud.quote(body.mode,body.job_id,body.job_data,{amount:body.amount,percent:body.percent,reason:body.reason,id:body.id,decision:body.decision,estimateId:body.estimateId||body.job_id});
+}
+function requestPreview(j,key,force){
+  if(!rt||(!force&&previewKey===key))return;
   previewKey=key;clearTimeout(previewTimer);
   previewTimer=setTimeout(()=>runPreview(j.id,key),600);
 }
