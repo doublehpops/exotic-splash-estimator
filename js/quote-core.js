@@ -243,7 +243,7 @@ async function handleQuoteRequest(body,deps,E){
     if(mode==='discount-decide'){
       const store=deps.discountStore;
       if(!store)throw new HttpError(503,'not_configured','Discount approval store is not configured');
-      const decided=store.decide({id:profile.id,role:profile.role},{id:body.id,decision:body.decision,amount:body.amount,percent:body.percent,estimateId:body.estimateId,ownerNote:owner?body.ownerNote:undefined,lowMarginException:body.lowMarginException===true});
+      const decided=await store.decide({id:profile.id,role:profile.role},{id:body.id,decision:body.decision,amount:body.amount,percent:body.percent,estimateId:body.estimateId,ownerNote:owner?body.ownerNote:undefined,lowMarginException:body.lowMarginException===true});
       if(!decided.ok)return{status:decided.status,body:{ok:false,code:decided.code,error:decided.error}};
       return{status:200,body:{ok:true,mode,request:decided.request}};
     }
@@ -272,7 +272,7 @@ async function handleQuoteRequest(body,deps,E){
     if(mode==='discount-request'){
       const store=deps.discountStore;
       if(!store||!DA)throw new HttpError(503,'not_configured','Discount approval store is not configured');
-      const requested=store.request({id:profile.id,role:profile.role},{
+      const requested=await store.request({id:profile.id,role:profile.role},{
         estimateId,revision,tier,beforeTotal:x.total,
         amount:body.amount,percent:body.percent,reason:body.reason
       });
@@ -283,12 +283,12 @@ async function handleQuoteRequest(body,deps,E){
       const store=deps.discountStore;
       if(!store)discountGate={applied:false,status:'not_configured',code:'not_configured'};
       else{
-        const checked=store.check({id:approvalId,estimateId,revision,tier,beforeTotal:x.total,markStale:mode==='record'});
+        const checked=await store.check({id:approvalId,estimateId,revision,tier,beforeTotal:x.total,markStale:mode==='record'});
         if(checked.ok){
           job.discountApproval={ok:true,amount:checked.amount};
           x=E.calculate(job,settings);
           if(mode==='record'){
-            const consumed=store.consume({id:profile.id,role:profile.role},{id:approvalId,estimateId,revision,tier,beforeTotal:checked.beforeTotal});
+            const consumed=await store.consume({id:profile.id,role:profile.role},{id:approvalId,estimateId,revision,tier,beforeTotal:checked.beforeTotal});
             if(!consumed.ok)return{status:consumed.status,body:{ok:false,code:consumed.code,error:consumed.error}};
           }
           discountGate={applied:true,status:'approved',amount:checked.amount,beforeTotal:checked.beforeTotal,afterTotal:r2(x.total)};
