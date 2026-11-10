@@ -375,42 +375,69 @@ function jobListHTML(){
   return `<div class="job-switcher">${state.jobs.map(j=>`<button type="button" class="job-chip ${j.id===state.activeJobId?'active':''}" data-switch-job="${j.id}"><b>${escape(j.customer||j.company||'Untitled lead')}${j.isSample?' · ILLUSTRATIVE SAMPLE':''}</b><small>${escape(j.address||'No address')} · ${escape(j.number)} · updated ${escape((j.updatedAt||'').slice(0,10))}</small></button>`).join('')}</div>`;
 }
 function syncDiscountApproval(j){
+  if(!j)return;
+  j.discount=0;
+  if(authMode()){j.discountApproval=null;return;}
   const DA=window.EsDiscountApproval;const store=discountStore();
-  if(!j||!DA||!store||!j.discountApprovalId){if(j)j.discountApproval=null;return;}
+  const DC=window.EsDiscountClient;
+  if(!DA||!store||!j.discountApprovalId||(DC&&DC.isServerApprovalId(j.discountApprovalId))){j.discountApproval=null;return;}
   const bare=Object.assign({},j,{discount:0,discountApproval:null});
   const before=E.calculate(bare,state.settings);
   const revision=DA.revisionOf(j,before.total);
   const checked=store.check({id:j.discountApprovalId,estimateId:j.id,revision,tier:j.priceOption||'regular',beforeTotal:before.total,markStale:false});
-  j.discount=0;
-  j.discountApproval=checked.ok?{ok:true,amount:checked.amount}:null;
+  j.discountApproval=checked.ok?{ok:true,amount:checked.amount,tier:checked.request&&checked.request.tier}:null;
 }
-function requestExtraDiscount(){
-  const j=activeJob();const DA=window.EsDiscountApproval;const store=discountStore();
-  if(!DA||!store){toast('Approval tools are not loaded');return;}
+async function requestExtraDiscount(){
+  const j=activeJob();
   j.discountApproval=null;j.discount=0;
-  const before=E.calculate(j,state.settings);
-  const revision=DA.revisionOf(j,before.total);
   const amount=j.discountRequestAmount;
   const percent=j.discountRequestPercent;
-  const res=store.request({id:isOwner()?'synthetic-owner':'synthetic-employee',role:isOwner()?'owner':'employee'},{
+  const blankAmount=amount===''||amount==null;
+  const blankPercent=percent===''||percent==null;
+  if(authMode()){
+    const DC=window.EsDiscountClient;
+    const res=await DC.requestDiscount(runtime.discountCall,{
+      serverId:j._serverId,jobData:quoteInput(j),
+      amount:blankAmount?null:amount,percent:blankPercent?null:percent,reason:j.discountRequestReason
+    });
+    if(!res.ok){toast(res.error);return;}
+    j.discountApprovalId=res.id;
+    j.discountServerStatus='pending';
+    j.discountServerTier=res.tier||j.priceOption||'regular';
+    j.discountServerAmount=res.request&&res.request.amount;
+    toast('Request recorded on the server. The customer total stays the same until the owner approves.');
+    render();
+    return;
+  }
+  const DA=window.EsDiscountApproval;const store=discountStore();
+  if(!DA||!store){toast('Approval tools are not loaded');return;}
+  const before=E.calculate(j,state.settings);
+  const revision=DA.revisionOf(j,before.total);
+  const res=store.request({id:'offline-preview',role:'employee'},{
     estimateId:j.id,revision,tier:j.priceOption||'regular',beforeTotal:before.total,
-    amount:amount===''||amount==null?null:amount,
-    percent:percent===''||percent==null?null:percent,
-    reason:j.discountRequestReason
+    amount:blankAmount?null:amount,percent:blankPercent?null:percent,reason:j.discountRequestReason
   });
   if(!res.ok){toast(res.error);return;}
   j.discountApprovalId=res.request.id;
-  toast('Request recorded. The customer total stays the same until the owner approves.');
+  j.discountServerStatus='pending';
+  toast('Offline preview only. This is not a server approval and cannot be finalized.');
   render();
 }
-function decideExtraDiscount(decision){
-  if(!isOwner()){toast('Only the owner can approve or reject.');return;}
-  const j=activeJob();const store=discountStore();
-  if(!store||!j.discountApprovalId){toast('There is no request on this estimate.');return;}
-  const res=store.decide({id:'synthetic-owner',role:'owner'},{id:j.discountApprovalId,decision,estimateId:j.id});
-  if(!res.ok){toast(res.error);return;}
-  toast(decision==='approve'?'Approved for this revision and tier.':'Rejected. The customer total is unchanged.');
-  render();
+async function decideExtraDiscount(decision){
+  const j=activeJob();
+  if(authMode()){
+    if(!isOwner()){toast('Only the owner can approve or reject. The price was not changed.');return;}
+    const DC=window.EsDiscountClient;
+    const res=await DC.decideDiscount(runtime.discountCall,{id:j.discountApprovalId,serverId:j._serverId,decision});
+    if(!res.ok){toast(res.error);j.discountApproval=null;return;}
+    j.discountServerStatus=res.status;
+    j.discountApproval=null;
+    toast(res.status==='approved'?'Approved on the server for this revision and tier.':'Rejected. The customer total is unchanged.');
+    if(runtime.requestPreview)runtime.requestPreview(j,quoteKey(j),true);
+    render();
+    return;
+  }
+  toast('Offline preview cannot approve a discount. The price was not changed.');
 }
 function calcLocal(){const j=ensureJob();syncPrepIntoEngineFields(j);syncDiscountApproval(j);return E.calculate(j,state.settings);}
 const SERVER_FIELDS=['sqft','finished','levelArea','levelEquiv','lines','base','regularBase','discountable','discountSqft','choices','selected','addOn','discount','minimum','subtotal','salesTax','total','perSqft','balance','finalizedBlocked','personHours','hours','travelMiles','warnings','quoteReady','quoteStatus','pendingReasons'];
@@ -434,9 +461,12 @@ function overlayServer(x,s){
 /** Employee (auth): totals come from the server quote for this exact job input. Until it arrives, mark Pending. */
 function calc(){
   const x=calcLocal();
-  if(!authMode()||isOwner())return x;
-  const j=activeJob();const key=quoteKey(j);const sq=serverQuotes[j.id];
+  if(!authMode())return x;
+  const j=activeJob();const key=quoteKey(j);const sq=j&&serverQuotes[j.id];
+  const needsServer=!isOwner()||!!(j&&j.discountApprovalId);
+  if(!needsServer)return x;
   if(sq&&sq.key===key)return overlayServer(x,sq.staff);
+  if(isOwner()){if(runtime.requestPreview)runtime.requestPreview(j,key);return x;}
   const y=stripCosts(x);
   y._serverPending=true;y.quoteReady=false;y.quoteStatus='pending';
   y.pendingReasons=['Server price check pending — totals are verified by the server before they can be shared.'].concat(x.pendingReasons||[]);
@@ -834,18 +864,18 @@ function discountStore(){
   if(!state.discountStore)state.discountStore=DA.createStore();
   return state.discountStore;
 }
-function discountRequestHTML(j,x){
+function discountRequestHTML(j){
   const owner=isOwner();
-  const store=discountStore();
-  const row=store&&j.discountApprovalId?store.get(j.discountApprovalId):null;
-  const applied=!!(j.discountApproval&&j.discountApproval.ok);
-  const status=applied?'approved':(row?row.status:'none');
-  const ask=`<div class="fields three">${field('Extra discount amount ($)','job.discountRequestAmount','number','Dollars off the selected tier. Leave blank to use a percent.')}${field('Or percent (%)','job.discountRequestPercent','number','Use one, not both.')}${field('Reason','job.discountRequestReason','text','Required. Shown on the approval record.')}</div>
+  const DC=window.EsDiscountClient;
+  const serverId=j.discountApprovalId&&DC&&DC.isServerApprovalId(j.discountApprovalId);
+  const status=authMode()?(serverId?(j.discountServerStatus||'pending'):'none'):(j.discountServerStatus||'none');
+  const ask=`<div class="fields three">${field('Extra discount amount ($)','job.discountRequestAmount','number','Dollars off the selected tier only. Leave blank to use a percent.')}${field('Or percent (%)','job.discountRequestPercent','number','Use one, not both.')}${field('Reason','job.discountRequestReason','text','Required. Shown on the approval record.')}</div>
   <button type="button" class="button secondary" id="requestExtraDiscount">Request owner approval</button>`;
-  const review=owner&&row&&row.status==='pending'?`<div class="inline-actions"><button type="button" class="button" id="approveExtraDiscount">Approve request</button><button type="button" class="button secondary" id="rejectExtraDiscount">Reject request</button></div>`:'';
+  const review=owner&&serverId&&status==='pending'?`<div class="inline-actions"><button type="button" class="button" id="approveExtraDiscount">Approve request</button><button type="button" class="button secondary" id="rejectExtraDiscount">Reject request</button></div>`:'';
+  const detail=serverId?` · server record ${escape(j.discountApprovalId)} · tier ${escape(j.discountServerTier||'')} · ${cash(j.discountServerAmount)}`:(authMode()?' · no server approval':' · offline preview, not a server approval');
   return `<div class="divider"></div><h4 style="margin:0 0 8px;font-size:13px">Extra discount</h4>
-  <p class="method-note">The selected tier is the price. An extra reduction is not included until the owner approves this estimate revision and tier. Pending and rejected requests leave the customer total unchanged. ${authMode()?'':'This browser preview is not the live server.'}</p>
-  <div class="info-banner"><b>Status:</b> ${escape(status)}${row?` · requested ${cash(row.amount)} · before ${cash(row.beforeTotal)} · after ${cash(row.afterTotal)}`:''}${applied?` · applied ${cash(j.discountApproval.amount)}`:''}</div>
+  <p class="method-note">The reduction applies only to the selected tier and revision after the server approves it. The other tiers stay at their own prices. Pending and rejected requests leave every total unchanged.</p>
+  <div class="info-banner"><b>Status:</b> ${escape(status)}${detail}</div>
   ${ask}${review}`;
 }
 function travelFormulaHTML(x){
@@ -1863,7 +1893,7 @@ document.addEventListener('click',e=>{
   }
   if(t.classList.contains('dialog-close'))$('helpDialog').close();
 });
-window.GuidedApp={get state(){return state},calc,ensureJob,guidedJob,guidedArea,computeAreaSqft,syncPrepIntoEngineFields,contactSufficient,backupObject,restoreObject,loadIllustrativeSample,STORAGE_KEY,STEPS,PREP_ITEMS,BASE_COLORS,FLAKE_BLENDS,E,save,render,activeJob,pushHistory,customerDocument,customerGuideDocument,customerVisibleLines,quoteAllocation,approvedAdjustmentCap,approvedAdjustmentLabel,clampJobDiscountToCap,jobSelectionFlags,moisturePriceEstimate,moistureSelectedAreas,subcontractorDocument,internalContent,equipmentPlan,calculateRoute,geocode,isOwner,go,goStep,APP_VERSION,resolveBaseColor,resolveFlakeBlend,applyColorFields,isCatalogJob,priceNeededBanner,catalogBreakdownDocHTML,
+window.GuidedApp={get state(){return state},calc,ensureJob,guidedJob,guidedArea,computeAreaSqft,syncPrepIntoEngineFields,contactSufficient,backupObject,restoreObject,loadIllustrativeSample,STORAGE_KEY,STEPS,PREP_ITEMS,BASE_COLORS,FLAKE_BLENDS,E,save,render,activeJob,pushHistory,customerDocument,customerGuideDocument,customerVisibleLines,quoteAllocation,approvedAdjustmentCap,approvedAdjustmentLabel,clampJobDiscountToCap,jobSelectionFlags,moisturePriceEstimate,moistureSelectedAreas,subcontractorDocument,internalContent,equipmentPlan,calculateRoute,geocode,isOwner,go,goStep,APP_VERSION,resolveBaseColor,resolveFlakeBlend,applyColorFields,isCatalogJob,priceNeededBanner,catalogBreakdownDocHTML,requestExtraDiscount,decideExtraDiscount,
   calcLocal,updateLive,authMode,quoteKey,quoteInput,setServerQuote,serverQuotes,stripCosts,overlayServer,LEGACY_KEYS,toast,
   get runtime(){return runtime},boot};
 /** v7: the page decides the mode. demo -> local storage (NOT SECURE). auth -> rt.profile/settings/jobs from server. */

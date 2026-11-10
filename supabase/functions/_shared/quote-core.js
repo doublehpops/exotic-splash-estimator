@@ -258,6 +258,7 @@ async function handleQuoteRequest(body,deps,E){
     }
     const clientDiscount=n(jobData.discount);
     const approvalId=jobData.discountApprovalId||body.discountApprovalId||null;
+    const approvalUuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(approvalId||''));
     delete jobData.discountApproval;
     jobData.discount=0;
     const pb=await deps.getPriceBook();
@@ -279,13 +280,15 @@ async function handleQuoteRequest(body,deps,E){
       if(!requested.ok)return{status:requested.status,body:{ok:false,code:requested.code,error:requested.error,beforeTotal:r2(x.total),revision,tier}};
       return{status:200,body:{ok:true,mode,request:requested.request,beforeTotal:r2(x.total),revision,tier,customerTotal:r2(x.total)}};
     }
-    if(enforce&&approvalId){
+    if(enforce&&approvalId&&!approvalUuid){
+      discountGate={applied:false,status:'invalid_approval_id',code:'invalid_approval_id',error:'Approval id is not a server record. The price was not changed.'};
+    }else if(enforce&&approvalId){
       const store=deps.discountStore;
       if(!store)discountGate={applied:false,status:'not_configured',code:'not_configured'};
       else{
         const checked=await store.check({id:approvalId,estimateId,revision,tier,beforeTotal:x.total,markStale:mode==='record'});
         if(checked.ok){
-          job.discountApproval={ok:true,amount:checked.amount};
+          job.discountApproval={ok:true,amount:checked.amount,tier:(checked.request&&checked.request.tier)||tier};
           x=E.calculate(job,settings);
           if(mode==='record'){
             const consumed=await store.consume({id:profile.id,role:profile.role},{id:approvalId,estimateId,revision,tier,beforeTotal:checked.beforeTotal});

@@ -39,9 +39,10 @@ function publicView(row){
     status:row.status,decidedAt:row.decidedAt,appliedAt:row.appliedAt,lowMarginException:!!row.lowMarginException
   };
 }
-function createStore(){
+function createStore(opts){
   const rows=[];
   let seq=1;
+  const nextId=opts&&opts.idFactory?opts.idFactory:function(){seq+=1;return 'local-'+seq};
   function find(id){return rows.find(r=>r.id===id)||null}
   function request(actor,input){
     input=input||{};
@@ -68,7 +69,7 @@ function createStore(){
     }
     if(!(amount>0)||amount>=beforeTotal)return fail(400,'invalid_reduction','Reduction must be positive and leave a selling total above zero');
     const row={
-      id:'da_'+seq++,estimateId,revision,tier,beforeTotal,amount,percent,reason,
+      id:nextId(),estimateId,revision,tier,beforeTotal,amount,percent,reason,
       afterTotal:r2(beforeTotal-amount),requesterId:actor.id,requestedAt:input.now||new Date().toISOString(),
       status:'pending',ownerId:null,decidedAt:null,appliedAt:null,ownerNote:null,lowMarginException:false
     };

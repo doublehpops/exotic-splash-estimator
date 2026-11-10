@@ -57,15 +57,18 @@ check('removal stays priced and no material surcharge is added',()=>{
   assert.strictEqual(x.lines.some(l=>/surcharge|upcharge/i.test(l.label)),false);
 });
 
-check('typed discount does not change the total without approval',()=>{
+check('typed discount does not change the total without a bound tier',()=>{
   const j=floor(100,'flake','opt2');
   j.discount=300;
-  j.discountApproval={ok:true,amount:300};
-  const forged=quote(Object.assign({},j,{discountApproval:{ok:true,amount:300}}));
-  const bare=quote(floor(100,'flake','opt2'));
-  assert.strictEqual(bare.total,900);
-  assert.strictEqual(forged.total,600);
+  const unbound=quote(Object.assign({},j,{discountApproval:{ok:true,amount:300}}));
+  const bound=quote(Object.assign({},j,{discountApproval:{ok:true,amount:300,tier:'opt2'}}));
+  assert.strictEqual(unbound.total,900);
+  assert.strictEqual(bound.total,600);
+  assert.strictEqual(bound.choices.regular.total,1000);
 });
+let approvalSeq=0;
+function approvalId(){approvalSeq+=1;return '00000000-0000-4000-8000-'+String(approvalSeq).padStart(12,'0')}
+function serverStore(){return DA.createStore({idFactory:approvalId})}
 
 function deps(store,profile,jobs){
   return {
@@ -79,7 +82,7 @@ function deps(store,profile,jobs){
 }
 
 (async()=>{
-  const store=DA.createStore();
+  const store=serverStore();
   const employee={id:'emp-1',role:'employee',active:true};
   const owner={id:'own-1',role:'owner',active:true};
   const jobs={};
@@ -136,7 +139,7 @@ function deps(store,profile,jobs){
   });
 
   await checkAsync('a rejected request and a cross-estimate approval do not reduce price',async()=>{
-    const fresh=DA.createStore();
+    const fresh=serverStore();
     const local=deps(fresh,employee,jobs);
     const asked=await Q.handleQuoteRequest({mode:'discount-request',job_id:JOB,percent:10,reason:'Ten percent'},local,E);
     const id=asked.body.request.id;
@@ -152,7 +155,7 @@ function deps(store,profile,jobs){
   });
 
   await checkAsync('an edited estimate makes the approval stale',async()=>{
-    const fresh=DA.createStore();
+    const fresh=serverStore();
     const asked=await Q.handleQuoteRequest({mode:'discount-request',job_id:JOB,amount:50,reason:'Small courtesy'},deps(fresh,employee,jobs),E);
     const id=asked.body.request.id;
     await Q.handleQuoteRequest({mode:'discount-decide',id,decision:'approve'},deps(fresh,owner,jobs),E);
@@ -166,7 +169,7 @@ function deps(store,profile,jobs){
   });
 
   await checkAsync('negative, zero, full, and empty requests are refused',async()=>{
-    const fresh=DA.createStore();
+    const fresh=serverStore();
     const local=deps(fresh,employee,jobs);
     jobs[JOB].job_data=floor(100,'solid','regular');
     for(const body of [{amount:-5,reason:'no'},{amount:0,reason:'no'},{amount:700,reason:'wipe'},{percent:100,reason:'wipe'},{amount:10,reason:''},{amount:10,percent:10,reason:'both'}]){
@@ -176,7 +179,7 @@ function deps(store,profile,jobs){
   });
 
   await checkAsync('share record without approval does not drop the price',async()=>{
-    const fresh=DA.createStore();
+    const fresh=serverStore();
     jobs[JOB].job_data=floor(100,'metallic','regular');
     jobs[JOB].job_data.discount=500;
     jobs[JOB].job_data.paid=1;
@@ -228,7 +231,7 @@ function deps(store,profile,jobs){
   });
 
   await checkAsync('server preview uses the same reconciled total as the calculator',async()=>{
-    const fresh=DA.createStore();
+    const fresh=serverStore();
     const j=floor(1200,'metallic','opt2');
     j.addOnIncluded=true;
     const staff={addOn:{label:'Standard property / trip add-in',low:9,high:2}};
@@ -250,6 +253,52 @@ function deps(store,profile,jobs){
     const chosen=customer.options.find(o=>o.key==='opt2');
     assert.strictEqual(chosen.total,selected.total);
     assert.strictEqual(chosen.reconciles,true);
+  });
+
+  check('a regular approval does not discount the other tiers',()=>{
+    const j=floor(1000,'solid','regular');
+    j.discountApproval={ok:true,amount:100,tier:'regular'};
+    const x=quote(j);
+    assert.strictEqual(x.choices.regular.total,6900);
+    assert.strictEqual(x.choices.opt1.total,5000);
+    assert.strictEqual(x.choices.opt2.total,6000);
+    assert.strictEqual(x.choices.opt1.payments.map(p=>p.amount).join(','),'2500,2500');
+    assert.strictEqual(x.choices.opt2.payments.map(p=>p.amount).join(','),'3000,1500,1500');
+  });
+
+  await checkAsync('a local approval id does not change the server price',async()=>{
+    const fresh=serverStore();
+    jobs[JOB].job_data=floor(1000,'solid','regular');
+    jobs[JOB].job_data.discountApprovalId='da_1';
+    jobs[JOB].job_data.discount=100;
+    const res=await Q.handleQuoteRequest({mode:'record',job_id:JOB},deps(fresh,owner,jobs),E);
+    assert.strictEqual(res.status,422);
+    assert.strictEqual(res.body.code,'invalid_approval_id');
+    const preview=await Q.handleQuoteRequest({mode:'preview',job_id:JOB,job_data:jobs[JOB].job_data},deps(fresh,owner,jobs),E);
+    assert.strictEqual(preview.body.staff.choices.regular.total,7000);
+    assert.strictEqual(preview.body.staff.choices.opt1.total,5000);
+    assert.strictEqual(preview.body.staff.choices.opt2.total,6000);
+  });
+
+  await checkAsync('a server approval uuid discounts only the approved tier',async()=>{
+    const fresh=serverStore();
+    const local=deps(fresh,employee,jobs);
+    jobs[JOB].job_data=floor(1000,'solid','regular');
+    const asked=await Q.handleQuoteRequest({mode:'discount-request',job_id:JOB,amount:100,reason:'TEST'},local,E);
+    assert.strictEqual(asked.status,200);
+    assert.strictEqual(asked.body.customerTotal,7000);
+    const id=asked.body.request.id;
+    assert.match(id,/^[0-9a-f-]{36}$/i);
+    await Q.handleQuoteRequest({mode:'discount-decide',id,decision:'approve'},deps(fresh,owner,jobs),E);
+    jobs[JOB].job_data.discountApprovalId=id;
+    const preview=await Q.handleQuoteRequest({mode:'preview',job_id:JOB,job_data:jobs[JOB].job_data},deps(fresh,owner,jobs),E);
+    assert.strictEqual(preview.body.staff.choices.regular.total,6900);
+    assert.strictEqual(preview.body.staff.choices.opt1.total,5000);
+    assert.strictEqual(preview.body.staff.choices.opt2.total,6000);
+    jobs[JOB].job_data.priceOption='opt1';
+    const otherTier=await Q.handleQuoteRequest({mode:'preview',job_id:JOB,job_data:jobs[JOB].job_data},deps(fresh,owner,jobs),E);
+    assert.strictEqual(otherTier.body.staff.total,5000);
+    assert.notStrictEqual(otherTier.body.discountStatus,'approved');
   });
 
   if(failed){console.error(failed+' failed');process.exit(1)}

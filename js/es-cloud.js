@@ -66,8 +66,8 @@ function create(client,opts){
     async listJobMarkups(){return unwrap(await client.from('job_owner_pricing').select('job_id,markup_pct'))||[]},
     async setJobMarkup(id,pct){return unwrap(await client.rpc('owner_set_job_markup',{p_job_id:id,p_markup_pct:pct}))},
     /* ---------- server-authoritative quote ---------- */
-    async quote(mode,jobId,jobData){
-      const body={mode};if(jobId)body.job_id=jobId;if(mode==='preview')body.job_data=jobData;
+    async quote(mode,jobId,jobData,extra){
+      const body=Object.assign({mode},extra||{});if(jobId)body.job_id=jobId;if(mode==='preview'||mode==='discount-request')body.job_data=jobData;
       const r=await client.functions.invoke(opts.quoteFunction||'quote-job',{body});
       if(r.error){
         let detail=null;try{detail=r.error.context&&typeof r.error.context.json==='function'?await r.error.context.json():null}catch{}
