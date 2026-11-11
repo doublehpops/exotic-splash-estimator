@@ -37,17 +37,20 @@ function showInvalid(errors){
   <div class="gate-error" role="alert"><b>public-config.js was rejected:</b><ul>${errors.map(e=>'<li>'+esc(e)+'</li>').join('')}</ul></div>
   <p>Fix <code>public-config.js</code> and reload. Sign-in stays disabled until the configuration is valid.</p>${demoButton()}`);
 }
-function showLogin(msg,kind){
+function showLogin(msg,kind,email){
+  const failed=!!(msg&&kind!=='ok');
   gateShell(`<h1 data-gate-state="login">Staff sign-in</h1>
   ${msg?`<div class="${kind==='ok'?'gate-ok':'gate-error'}" role="${kind==='ok'?'status':'alert'}">${esc(msg)}</div>`:''}
   <form id="loginForm" class="gate-form" novalidate>
-    <label>Email<input id="loginEmail" type="email" autocomplete="username" required></label>
+    <label>Email<input id="loginEmail" type="email" autocomplete="username" required value="${esc(email||'')}"></label>
     <label>Password<input id="loginPassword" type="password" autocomplete="current-password" required></label>
     <button type="submit" class="button" id="loginSubmit">Sign in</button>
   </form>
+  ${failed?`<div class="gate-next"><p><b>What to do next</b></p><ol class="gate-steps"><li>The email above is kept. Check it, then re-enter the password.</li><li>If you do not remember the password, use <b>Forgot password?</b>.</li><li>There is no public sign-up. Ask the owner to invite you and approve the account. New accounts stay off until then.</li></ol></div>`:''}
   <p class="gate-links"><button type="button" class="text-button" id="gateForgot">Forgot password?</button></p>
   <p class="gate-small" id="noSignup">No public sign-up. Accounts are created by invitation from the owner; new accounts stay disabled until the owner approves them.</p>
   ${cfg.allowOfflineDemo?demoButton():''}`);
+  if(failed){const pw=$('loginPassword');if(pw)setTimeout(()=>pw.focus(),0)}
 }
 function showForgot(msg){
   gateShell(`<h1 data-gate-state="forgot">Reset password</h1>
@@ -240,7 +243,13 @@ function applyOutbox(uid,jobs){
     else if(!o.serverId){jobs.unshift(Object.assign({},o.data,{id:o.id,_local:true}));outboxIds.add(o.id)}
   }
 }
-function setSync(s){if(!rt)return;rt.syncStatus=s;const el=$('saveStatus');if(el)el.textContent='Server: '+s;const pill=$('savePill');if(pill)pill.textContent=s}
+function setSync(s){
+  if(!rt)return;rt.syncStatus=s;
+  const el=$('saveStatus');if(el)el.textContent='Server: '+s;
+  const saving=/^saving/i.test(s),saved=/^saved/i.test(s);
+  const label=saving?'Saving…':(saved?'Saved':s);
+  D.querySelectorAll('.save-pill').forEach(p=>{p.hidden=false;p.textContent=label;p.dataset.state=saving?'saving':(saved?'saved':'')});
+}
 function onSave(j){
   if(!j||!rt)return;
   const sig=jobSig(j);
@@ -522,9 +531,10 @@ async function revoke(id){
 D.addEventListener('submit',async ev=>{
   const f=ev.target;if(!f||!f.id)return;ev.preventDefault();
   if(f.id==='loginForm'){
+    const email=($('loginEmail')&&$('loginEmail').value)||'';
     const btn=$('loginSubmit');btn.disabled=true;btn.textContent='Signing in…';
-    try{await cloud.signIn($('loginEmail').value,$('loginPassword').value);await enterApp()}
-    catch(e){showLogin(e.message)}
+    try{await cloud.signIn(email,$('loginPassword').value);await enterApp()}
+    catch(e){showLogin(e.message,'error',email)}
   }
   if(f.id==='forgotForm'){
     const btn=$('forgotSubmit');btn.disabled=true;
@@ -557,7 +567,47 @@ D.addEventListener('change',ev=>{
 W.addEventListener('beforeunload',e=>{if(rt&&(dirty.size||inflight)){writeOutbox();e.preventDefault();e.returnValue=''}});
 
 /* ------------------------------------------------------------------ start */
+function localPreview(){
+  const host=W.location.hostname;
+  if(host!=='localhost'&&host!=='127.0.0.1')return '';
+  return new URLSearchParams(W.location.search).get('preview')||'';
+}
+/* Localhost-only fixture so the phone layout can be reviewed without a production sign-in. */
+function startPreview(kind){
+  if(kind==='login'){
+    cloud={signIn:async()=>{throw new Error('Sign-in failed. Check email and password, or ask the owner whether your account is approved.')},requestPasswordReset:async()=>true,signOut:async()=>{},getSession:async()=>null,onAuthChange(){return{unsubscribe(){}}}};
+    showLogin();
+    return;
+  }
+  const q=new URLSearchParams(W.location.search);
+  const fresh=q.get('fresh')==='1';
+  const sample={customer:'Jordan Lee',email:'jordan@example.com',phone:'312-555-0148',address:'1200 W Hubbard St, Chicago, IL',areas:[{name:'Floor area',sqftMode:'rectangles',rectangles:[{length:20,width:15}],sqft:300,style:'solid',moisture:false}]};
+  rt={mode:'auth',profile:{id:'preview-owner',email:'owner@example.com',full_name:'Preview Owner',role:'owner',active:true},settings:E().defaults,jobs:fresh?[]:[sample],syncStatus:'saved',
+    onSave(){D.querySelectorAll('.save-pill').forEach(el=>{el.textContent='Saving…';el.dataset.state='saving'});clearTimeout(startPreview._t);startPreview._t=setTimeout(()=>D.querySelectorAll('.save-pill').forEach(el=>{el.textContent='Saved';el.dataset.state='saved'}),450)},
+    requestPreview(){},discountCall:async()=>({ok:false,error:'Preview only'}),
+    onClick(t){if(t.dataset.view==='staff'){G().go('staff');return true}if(t.dataset.view==='approvals'){G().go('approvals');return true}return false},
+    priceBookPanelHTML(){return ''},sharePanelHTML(){return ''},photoSrc(){return ''},photoRemoved(){},
+    approvals:[
+      {id:'10000000-0000-4000-8000-0000000000a1',estimateId:'20000000-0000-4000-8000-0000000000b1',jobNumber:'ES-20261111-04',customer:'Rivera Auto Care',requesterName:'Sam Ellis',requesterEmail:'sam@example.com',requestedAt:'2026-11-11T15:04:00Z',tier:'opt1',beforeTotal:2100,amount:300,percent:null,afterTotal:1800,reason:'Repeat garage customer',status:'pending'},
+      {id:'10000000-0000-4000-8000-0000000000a2',estimateId:'20000000-0000-4000-8000-0000000000b2',jobNumber:'ES-20261110-02',customer:'North Hall Cafe',requesterName:'Sam Ellis',requesterEmail:'sam@example.com',requestedAt:'2026-11-10T18:22:00Z',tier:'regular',beforeTotal:6400,amount:400,percent:null,afterTotal:6000,reason:'Match a written competitor quote',status:'pending'}
+    ],
+    approvalFilter:'pending',approvalsPending:2,acceptances:[],staffList:[
+      {id:'preview-owner',email:'owner@example.com',full_name:'Preview Owner',role:'owner',active:true},
+      {id:'preview-staff',email:'sam@example.com',full_name:'Sam Ellis',role:'employee',active:true}
+    ],shares:{},newShare:null,audit:null,localScan:null};
+  rt.staffViewHTML=staffViewHTML;rt.approvalsViewHTML=approvalsViewHTML;rt.jobsExtraHTML=jobsExtraHTML;
+  $('gate').hidden=true;$('appRoot').hidden=false;
+  D.body.classList.add('mode-auth');D.body.classList.remove('mode-demo');
+  decorateShell();
+  const badge=$('esApprovalBadge');if(badge){badge.textContent='2';badge.hidden=false}
+  G().boot(rt);
+  const step=q.get('step'),view=q.get('view');
+  if(view)G().go(view);
+  else if(step&&G().STEPS.some(s=>s.id===step))G().goStep(step);
+}
 function start(){
+  const preview=localPreview();
+  if(preview==='login'||preview==='owner'){startPreview(preview);return}
   let demoFlag=false;try{demoFlag=W.sessionStorage.getItem(DEMO_FLAG)==='1'}catch{}
   if(demoFlag&&demoAllowed()){startDemo();return}
   if(cfg.state==='unconfigured'){showUnconfigured();return}
