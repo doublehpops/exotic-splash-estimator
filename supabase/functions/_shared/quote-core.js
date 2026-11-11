@@ -16,6 +16,14 @@ const clone=x=>JSON.parse(JSON.stringify(x));
 const STAFF_SECTIONS=['business','rates','pricingOptions','addOn','approvedAdjustment','catalog','notes'];
 const OWNER_SECTIONS=['products','costs'];
 function discountApi(){return (typeof globalThis!=='undefined'&&globalThis.EsDiscountApproval)||(typeof require==='function'?function(){try{return require('./discount-approval.js')}catch(e){return null}}():null)}
+function sanityApi(){return (typeof globalThis!=='undefined'&&globalThis.EsPriceSanity)||(typeof require==='function'?function(){try{return require('./price-sanity.js')}catch(e){return null}}():null)}
+function priceStop(x,owner,body){
+  const S=sanityApi();
+  if(S&&S.quoteStop)return S.quoteStop(x,{owner:!!owner,sanityContinue:!!(body&&body.sanityContinue)});
+  const blocks=x&&x.blockingIssues||[];
+  if(blocks.length)return {status:422,body:{ok:false,code:'price_blocked',error:blocks[0].message||'Price is blocked',blockingIssues:blocks.map(b=>b.message)}};
+  return null;
+}
 
 /* identical semantics to guided-app.js merge(): only keys present in defaults are taken */
 function merge(target,source){for(const k of Object.keys(target)){if(source&&Object.prototype.hasOwnProperty.call(source,k)){if(target[k]&&typeof target[k]==='object'&&!Array.isArray(target[k])&&source[k]&&typeof source[k]==='object'&&!Array.isArray(source[k]))merge(target[k],source[k]);else target[k]=source[k]}}return target}
@@ -291,6 +299,8 @@ async function handleQuoteRequest(body,deps,E){
           job.discountApproval={ok:true,amount:checked.amount,tier:(checked.request&&checked.request.tier)||tier};
           x=E.calculate(job,settings);
           if(mode==='record'){
+            const stop=priceStop(x,owner,body);
+            if(stop)return stop;
             const consumed=await store.consume({id:profile.id,role:profile.role},{id:approvalId,estimateId,revision,tier,beforeTotal:checked.beforeTotal});
             if(!consumed.ok)return{status:consumed.status,body:{ok:false,code:consumed.code,error:consumed.error}};
           }
@@ -309,6 +319,8 @@ async function handleQuoteRequest(body,deps,E){
     if(mode==='preview'&&!owner&&n(job.discount)>staff.cap+0.005&&(job.priceOption||'regular')==='regular')
       out.discountOverCap=true;
     if(mode==='record'){
+      const stop=priceStop(x,owner,body);
+      if(stop)return stop;
       const customer=customerSnapshot(E,job,x,settings);
       delete customer.ownerNote;delete customer.discountApproval;
       const internal=internalSnapshot(x,job.markup);

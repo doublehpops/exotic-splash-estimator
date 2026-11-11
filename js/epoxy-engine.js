@@ -96,6 +96,7 @@ function resolveAdj(map,key,label,pending,lines){
     return {ok:false,amount:0,configured:false};
   }
   const amount=Number(raw);
+  /* Flat dollar amount. Never multiply a catalog adjustment by area sq ft. */
   if(amount){
     lines.push({kind:'adjustment',label:label,description:'Catalog adjustment from price book',qty:1,unit:'ea',rate:amount,total:amount});
   }
@@ -240,7 +241,41 @@ function tierFinishProject(finishLines,ratesMap){
   }
   return {project,used};
 }
+function sanityApi(){
+  const g=typeof globalThis!=='undefined'?globalThis:root;
+  if(g&&g.EsPriceSanity)return g.EsPriceSanity;
+  if(typeof require==='function'){try{return require('./price-sanity.js')}catch(e){return null}}
+  return null;
+}
+function finishQuote(job,result,collected){
+  const S=sanityApi();
+  const blocks=[...((collected&&collected.blocks)||[])];
+  const warnings=[...((collected&&collected.warnings)||[])];
+  if(S){
+    const extra=S.review(job,result);
+    blocks.push(...(extra.blocks||[]));
+    warnings.push(...(extra.warnings||[]));
+  }
+  const seenB=new Set(),seenW=new Set();
+  const b=blocks.filter(i=>{if(!i||seenB.has(i.message))return false;seenB.add(i.message);return true});
+  const w=warnings.filter(i=>{if(!i||seenB.has(i.message)||seenW.has(i.message))return false;seenW.add(i.message);return true});
+  result.blockingIssues=b;
+  result.sanity={warnings:w,blocks:b,ok:b.length===0};
+  if(b.length){
+    result.quoteReady=false;
+    result.finalizedBlocked=true;
+    result.quoteStatus='blocked';
+    result.pendingReasons=[...new Set([...(result.pendingReasons||[]),...b.map(i=>i.message)])];
+  }
+  for(const i of b)result.warnings.push(i.message);
+  for(const i of w)result.warnings.push(i.message);
+  return result;
+}
 function calculateCatalog(job,settings){
+  const S=sanityApi();
+  const guarded=S?S.guardSettings(settings):{settings:settings,blocks:[],warnings:[]};
+  settings=guarded.settings;
+  const collected={blocks:[...guarded.blocks],warnings:[...guarded.warnings]};
   const c=settings.costs,tr=travelInfo(job,settings);
   const br=buildCatalogBreakdown(job,settings);
   const warnings=[...br.pendingUnique];
@@ -294,7 +329,7 @@ function calculateCatalog(job,settings){
   }
   const profit=subtotal-cost,margin=subtotal?profit/subtotal*100:0;
   const sqft=br.measureSqft||0;
-  return{
+  const result={
     sqft,finished:sqft,levelArea:0,levelEquiv:0,material,mat,tax,hours,labor,equipment,equip,direct,overhead,overheadBase,overheadItems,contingency,cost,
     lines,base:regularBase,regularBase,discountable,discountSqft:0,choices,selected:sel,addOn,travel:tr,travelCost,travelInQuote,crew:tr.crew,
     discount:sel.discount,minimum,subtotal,salesTax,total,profit,margin,perSqft:sqft&&br.quoteReady?total/sqft:0,travelMiles:tr.vehicleMiles,
@@ -307,6 +342,7 @@ function calculateCatalog(job,settings){
     },
     finalizedBlocked:!br.quoteReady
   };
+  return finishQuote(job,result,collected);
 }
 
 function calculate(job,settings){
@@ -316,11 +352,21 @@ function calculate(job,settings){
    return calculateCatalog(job,settings);
  }
  /* Measured garage: treat as floor workflow (existing per-sq-ft rates — approved floor economics) */
+ const S=sanityApi();
+ const guarded=S?S.guardSettings(settings):{settings:settings,blocks:[],warnings:[]};
+ settings=guarded.settings;
+ const collected={blocks:[...guarded.blocks],warnings:[...guarded.warnings]};
  const p=Object.fromEntries(Object.entries(settings.products).map(([k,v])=>[k,{...v,coverage:n(v.coverage)>0?n(v.coverage):(defaults.products[k]?.coverage||1)}])),c=settings.costs,r=settings.rates,w=1+n(c.waste)/100,tr=travelInfo(job,settings);
  const demand={},material=[],customer=[],extras=[];let sqft=0,finished=0,levelArea=0,levelEquiv=0,coatPassArea=0,gripArea=0;
  const add=(key,q)=>{demand[key]=(demand[key]||0)+n(q)};
- for(const a of job.areas){const sf=n(a.sqft);if(!sf)continue;sqft+=sf;const style=['solid','flake','metallic','sealer','level'].includes(a.style)?a.style:'solid';const lev=style==='level'||a.level;
-  if(lev){const depth=n(a.depth);levelArea+=sf;levelEquiv+=sf*depth/0.25;add('level',sf*depth/0.25/p.level.coverage*w);add('levelPrimer',sf/p.levelPrimer.coverage*w)}
+ for(const a of job.areas){
+  const rateProblem=S&&S.customRateProblem(a);
+  if(rateProblem)collected.blocks.push(rateProblem);
+  const sf=n(a.sqft);if(!sf)continue;sqft+=sf;const style=['solid','flake','metallic','sealer','level'].includes(a.style)?a.style:'solid';const lev=style==='level'||a.level;
+  const depthCap=S?S.capDepth(a.depth,a.name||'Floor area'):{depth:n(a.depth),issue:null};
+  if(depthCap.issue)collected.blocks.push(depthCap.issue);
+  const depth=depthCap.depth;
+  if(lev){levelArea+=sf;levelEquiv+=sf*depth/0.25;add('level',sf*depth/0.25/p.level.coverage*w);add('levelPrimer',sf/p.levelPrimer.coverage*w)}
   const areaMoisture=!!(a.moisture||(a.prep&&a.prep.moisture));
   if(style!=='level'){finished+=sf;add('top',sf/p.top.coverage*w);coatPassArea+=sf;
    if(style==='sealer'){add('sealer',sf/p.sealer.coverage*w);coatPassArea+=sf}
@@ -331,15 +377,15 @@ function calculate(job,settings){
    if(a.grip){gripArea+=sf;add('grip',sf/p.grip.coverage)}
    if(areaMoisture){add('moisture',sf/p.moisture.coverage*w);extras.push({label:'Moisture-control primer / barrier — '+(a.name||'area'),description:'Per-area allowance · pending testing and system approval',qty:sf,unit:'sq ft',rate:n(r.moisture),total:sf*n(r.moisture),areaId:a.id,kind:'moisture'})}
   }
-  const custom=a.rate!==null&&a.rate!==''&&a.rate!==undefined;
+  const custom=!rateProblem&&a.rate!==null&&a.rate!==''&&a.rate!==undefined;
   const baseRate=custom?n(a.rate):n(r[style]);
   let extraPerSqft=0;
   if(!custom&&style==='solid')extraPerSqft=Math.max(0,n(a.coats)-1)*n(r.extraCoat??1.5);
   if(!custom&&style==='flake')extraPerSqft=a.flake==='full'?n(r.fullFlakeExtra??1):a.flake==='medium'?n(r.mediumFlakeExtra??0.5):0;
   const unit=baseRate+extraPerSqft;
-  const effective=style==='level'?unit*n(a.depth)/0.25:unit;
+  const effective=style==='level'?unit*depth/0.25:unit;
   customer.push({kind:style==='level'?'scope':'finish',style,customRate:!!custom,extraPerSqft:style==='level'?0:extraPerSqft,label:a.name||'Floor area',description:describe(a),qty:sf,unit:'sq ft',rate:effective,total:sf*effective});
-  if(a.level&&style!=='level')extras.push({label:'Self-leveling preparation - '+(a.name||'area'),description:n(a.depth)+' inch average depth; additional to finish',qty:sf,unit:'sq ft',rate:n(r.level)*n(a.depth)/0.25,total:sf*n(r.level)*n(a.depth)/0.25});
+  if(a.level&&style!=='level')extras.push({label:'Self-leveling preparation - '+(a.name||'area'),description:depth+' inch average depth; additional to finish',qty:sf,unit:'sq ft',rate:n(r.level)*depth/0.25,total:sf*n(r.level)*depth/0.25});
  }
  /* v5: job.moisture no longer auto-charges all finished sqft — per-area only. Legacy job.moisture ignored for charging. */
  if(n(job.patchKits)){add('patch',n(job.patchKits));extras.push({label:'Minor patching allowance',description:'Patch kits and application; nonstructural repairs',qty:n(job.patchKits),unit:'kit',rate:n(r.patch),total:n(job.patchKits)*n(r.patch)})}
@@ -405,8 +451,9 @@ function calculate(job,settings){
  if(type==='garage'&&garageUsesMeasured(job)){
    warnings.push('Garage >3-car / measured size: using measured sq ft with floor rate book (not a flat 1/2/3-car package).');
  }
- return{sqft,finished,levelArea,levelEquiv,material,mat,tax,hours,labor,equipment,equip,direct,overhead,overheadBase,overheadItems,contingency,cost,lines,base:regularBase,regularBase,discountable,discountSqft,choices,selected:sel,addOn,travel:tr,travelCost,travelInQuote,crew:tr.crew,discount,minimum,subtotal,salesTax,total,profit,margin,perSqft:sqft?total/sqft:0,travelMiles,personHours:hours.reduce((s,x)=>s+x.qty,0),balance:Math.max(0,total-n(job.paid)),warnings,
+ const result={sqft,finished,levelArea,levelEquiv,material,mat,tax,hours,labor,equipment,equip,direct,overhead,overheadBase,overheadItems,contingency,cost,lines,base:regularBase,regularBase,discountable,discountSqft,choices,selected:sel,addOn,travel:tr,travelCost,travelInQuote,crew:tr.crew,discount,minimum,subtotal,salesTax,total,profit,margin,perSqft:sqft?total/sqft:0,travelMiles,personHours:hours.reduce((s,x)=>s+x.qty,0),balance:Math.max(0,total-n(job.paid)),warnings,
    quoteReady:!!sqft,quoteStatus:sqft?'ready':'incomplete',pendingReasons:[],catalog:type==='garage'?{type:'garage',garagePackage:'measured',mode:'measured_sqft'}:null,finalizedBlocked:!sqft};
+ return finishQuote(job,result,collected);
 }
 function describe(a){const names={solid:'Solid-color epoxy',flake:'Decorative flake epoxy',metallic:'Metallic epoxy',sealer:'Clear sealer + protective topcoat',level:'Self-leveling preparation only'};let s=names[a.style]||names.solid;if(a.style!=='level'){const col=(a.colorKey==='custom'&&a.customColor)?a.customColor:(a.color||'color to be confirmed');s+='; '+col;}if(a.style==='solid')s+='; '+Math.max(1,n(a.coats))+' base coat(s)';if(a.style==='flake'){s+='; '+(a.flake==='full'?'full broadcast':a.flake==='medium'?'medium broadcast':'light spot flakes');const fb=(a.flakeBlend==='custom'&&a.customFlakeBlend)?a.customFlakeBlend:(a.flakeBlendLabel||a.flakeBlend||'');if(fb)s+=', flake blend: '+fb;}if(a.grip&&a.style!=='level')s+='; slip-resistant texture';if(a.style==='level'||a.level)s+='; leveling '+n(a.depth)+' inch average';if(a.moisture||(a.prep&&a.prep.moisture))s+='; moisture-control primer/barrier on this area';return s;}
 function areaHasMoisture(a){return !!(a&&(a.moisture||(a.prep&&a.prep.moisture)))}

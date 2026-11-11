@@ -153,3 +153,7 @@ table.doc-options,
 .warn-banner.price-needed li{margin:4px 0;font-size:12px}
 .pending-total,.big-total.pending-total{color:#a67c00!important;letter-spacing:.02em}
 .quote-summary .pending-total{font-size:clamp(28px,5vw,40px)}
+.rate-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.rate-row input{flex:1 1 120px;min-width:0}
+.rate-hint{font-size:12px;line-height:1.4;color:var(--muted)}
+.rate-error{margin-top:8px}
