@@ -261,6 +261,61 @@ check('a negative catalog adjustment is still clamped and does not reduce the pr
   assert.notStrictEqual(x.total,3500);
 });
 
+function garageWithAdj(adj){
+  const settings=JSON.parse(JSON.stringify(E.defaults));
+  settings.catalog.garage.twoCarStarting=4000;
+  settings.catalog.garage.materialAdj.flake=adj;
+  const j=E.newJob();
+  Object.assign(j,{customer:'Pat',projectType:'garage',garagePackage:'2car',garageStyle:'flake',garageTopcoat:'protective',garageCondition:'good',miles:0,minutes:0});
+  return E.calculate(j,settings);
+}
+check('one catalog add-on: $5,000 passes, over $5,000 warns',()=>{
+  const ok=garageWithAdj(5000);
+  assert.strictEqual(ok.blockingIssues.length,0);
+  assert.ok(!warns(ok).includes('for one catalog add-on'),warns(ok));
+  const w=garageWithAdj(5000.01);
+  assert.strictEqual(w.blockingIssues.length,0);
+  assert.ok(warns(w).includes('over $5,000 for one catalog add-on'),warns(w));
+});
+check('one catalog add-on: $25,000 warns, over $25,000 blocks',()=>{
+  const edge=garageWithAdj(25000);
+  assert.strictEqual(edge.blockingIssues.length,0);
+  assert.ok(warns(edge).includes('over $5,000 for one catalog add-on'));
+  const big=garageWithAdj(90000);
+  assert.strictEqual(big.quoteReady,false);
+  assert.ok(big.finalizedBlocked);
+  assert.ok(msgs(big).includes('over the $25,000 limit for one catalog add-on'),msgs(big));
+});
+check('catalog add-on cap uses the absolute value, so big credits are caught',()=>{
+  const r=S.review({projectType:'garage'},{sqft:0,total:1000,lines:[{kind:'adjustment',label:'Garage credit',qty:1,unit:'ea',rate:-30000,total:-30000}]});
+  assert.ok(r.blocks.some(b=>/Garage credit is -\$30,000\.00, over the \$25,000 limit/.test(b.message)),JSON.stringify(r.blocks));
+  const r2=S.review({projectType:'garage'},{sqft:0,total:1000,lines:[{kind:'adjustment',label:'Garage credit',qty:1,unit:'ea',rate:-6000,total:-6000}]});
+  assert.strictEqual(r2.blocks.length,0);
+  assert.ok(r2.warnings.some(w=>/over \$5,000 for one catalog add-on/.test(w.message)));
+});
+check('price book save flags catalog add-on amounts over the caps',()=>{
+  const settings=JSON.parse(JSON.stringify(E.defaults));
+  assert.strictEqual(S.bookIssues(settings).blocks.length,0);
+  settings.catalog.garage.prepAdj={cracks:6000,coatingRemoval:650};
+  settings.catalog.flatwork.materialAdj={metallic:-26000};
+  const found=S.bookIssues(settings);
+  assert.ok(found.warnings.some(w=>/garage prepAdj cracks.*over \$5,000/.test(w.message)),JSON.stringify(found.warnings));
+  assert.ok(found.blocks.some(b=>/flatwork materialAdj metallic.*over the \$25,000 limit/.test(b.message)),JSON.stringify(found.blocks));
+  assert.ok(!found.warnings.concat(found.blocks).some(i=>/coatingRemoval/.test(i.message)));
+});
+check('property / trip add-in is removed: $0 default, an old job with the box checked is not charged',()=>{
+  assert.strictEqual(E.defaults.addOn.low,0);
+  assert.strictEqual(E.defaults.addOn.high,0);
+  const live=Q.buildSettings(E,{rates:{flake:10,solid:7,metallic:15,extraCoat:1.5,fullFlakeExtra:1,mediumFlakeExtra:0.5},addOn:{label:'Standard property / trip add-in',low:0,high:0}},{});
+  for(const tier of ['low','high']){
+    const on=E.calculate(floorJob(450,'flake',{addOnIncluded:true,addOnTier:tier}),live);
+    const off=E.calculate(floorJob(450,'flake',{addOnIncluded:false}),live);
+    assert.strictEqual(on.total,off.total);
+    assert.strictEqual(on.addOn.included,false);
+    assert.ok(!on.lines.some(l=>l.kind==='addon'));
+  }
+});
+
 check('a normal 2-car garage passes',()=>{
   const settings=JSON.parse(JSON.stringify(E.defaults));
   settings.catalog.garage.twoCarStarting=4500;
@@ -406,6 +461,22 @@ check('blended and measured-total boundaries',()=>{
     const adj=out.res.body.customer.catalogAdjustments.find(l=>/flake/i.test(l.label));
     assert.strictEqual(adj.qty,1);
     assert.strictEqual(adj.total,2250);
+  });
+
+  await checkAsync('server blocks one catalog add-on over $25,000 and records nothing',async()=>{
+    const job=E.newJob();
+    Object.assign(job,{customer:'Pat',projectType:'garage',garagePackage:'2car',garageStyle:'flake',garageTopcoat:'protective',garageCondition:'good',miles:0,minutes:0});
+    const staff={catalog:{garage:{twoCarStarting:4000,materialAdj:{flake:90000}}}};
+    const owner=await record(job,'owner',staff,{sanityContinue:true});
+    assert.strictEqual(owner.res.status,422);
+    assert.strictEqual(owner.res.body.code,'price_blocked');
+    assert.strictEqual(owner.recorded,0);
+    assert.ok(owner.res.body.error.includes('over the $25,000 limit for one catalog add-on'),owner.res.body.error);
+    const warnStaff={catalog:{garage:{twoCarStarting:4000,materialAdj:{flake:6000}}}};
+    const emp=await record(job,'employee',warnStaff,{sanityContinue:true});
+    assert.strictEqual(emp.res.status,422);
+    assert.strictEqual(emp.res.body.code,'price_warning');
+    assert.strictEqual(emp.recorded,0);
   });
 
   await checkAsync('server blocks 64,800 sq ft entered as square inches',async()=>{

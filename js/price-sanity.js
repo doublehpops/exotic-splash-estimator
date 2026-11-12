@@ -18,6 +18,8 @@ const BLEND_WARN_HIGH=30, BLEND_WARN_LOW=4, BLEND_BLOCK=50;
 const TOTAL_WARN=75000, TOTAL_BLOCK=250000;
 const GARAGE_WARN=8000, GARAGE_BLOCK=15000;
 const FLATWORK_WARN=3000, SEATING_WARN=500;
+const ADDON_WARN=5000, ADDON_BLOCK=25000; /* one catalog add-on, absolute dollars (credits included) */
+const CATALOG_ADJ_MAPS=['prepAdj','conditionAdj','materialAdj','topcoatAdj'];
 const PER_SQFT_RATE_KEYS=['solid','flake','metallic','sealer','level','removal','moisture','extraCoat','mediumFlakeExtra','fullFlakeExtra'];
 const RATE_LABELS={
   solid:'Solid epoxy / sq ft',
@@ -133,7 +135,37 @@ function guardSettings(settings){
   }
   return {settings:next,blocks:found.blocks,warnings:found.warnings};
 }
-function bookIssues(settings){return collectBook(settings);}
+function addOnAmountIssue(label,raw){
+  if(raw===null||raw===undefined||raw==='')return null;
+  const v=Number(raw);
+  if(!Number.isFinite(v))return null;
+  const a=Math.abs(v);
+  if(a>ADDON_BLOCK)return issue('block','catalog_addon_amount',label,label+' is '+money(v)+', over the $25,000 limit for one catalog add-on.');
+  if(a>ADDON_WARN)return issue('warn','catalog_addon_amount',label,label+' is '+money(v)+', over $5,000 for one catalog add-on.');
+  return null;
+}
+/* Catalog add-on dollar amounts in the price book (checked when the book is saved). */
+function collectCatalog(settings){
+  const blocks=[],warnings=[];
+  const cat=(settings&&settings.catalog)||{};
+  for(const group of Object.keys(cat)){
+    const g=cat[group];
+    if(!g||typeof g!=='object')continue;
+    for(const mapKey of CATALOG_ADJ_MAPS){
+      const map=g[mapKey];
+      if(!map||typeof map!=='object')continue;
+      for(const key of Object.keys(map)){
+        const hit=addOnAmountIssue('Catalog '+group+' '+mapKey+' '+key,map[key]);
+        if(hit)(hit.level==='block'?blocks:warnings).push(hit);
+      }
+    }
+  }
+  return {blocks,warnings};
+}
+function bookIssues(settings){
+  const a=collectBook(settings),b=collectCatalog(settings);
+  return {blocks:a.blocks.concat(b.blocks),warnings:a.warnings.concat(b.warnings)};
+}
 function areaSqftOf(job){
   let s=0;
   for(const a of (job&&job.areas)||[])s+=Number(a&&a.sqft)||0;
@@ -213,6 +245,12 @@ function review(job,result){
       blocks.push(issue('block','catalog_times_sqft',line.label||'Catalog adjustment',(line.label||'Catalog adjustment')+': this catalog adjustment was multiplied by sq ft. Catalog adjustments are a flat dollar amount.'));
     }
   }
+  /* One catalog add-on line: warn over $5,000, block over $25,000 (absolute value). */
+  for(const line of lines){
+    if(line.kind!=='adjustment')continue;
+    const hit=addOnAmountIssue(line.label||'Catalog adjustment',line.total);
+    if(hit)(hit.level==='block'?blocks:warnings).push(hit);
+  }
   return {blocks,warnings,ok:blocks.length===0};
 }
 function fingerprint(list){return (list||[]).map(x=>x&&x.message?x.message:String(x||'')).join('\n');}
@@ -232,7 +270,7 @@ function quoteStop(result,opts){
   return null;
 }
 return {
-  PER_SQFT_RATE_KEYS,PER_SQFT_MAX,PER_SQFT_WARN,DEPTH_MAX,SQFT_WARN,SQFT_BLOCK,
+  PER_SQFT_RATE_KEYS,PER_SQFT_MAX,PER_SQFT_WARN,DEPTH_MAX,SQFT_WARN,SQFT_BLOCK,ADDON_WARN,ADDON_BLOCK,
   customRateProblem,capDepth,guardSettings,bookIssues,review,fingerprint,quoteStop,money
 };
 });
