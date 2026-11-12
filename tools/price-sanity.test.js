@@ -1,0 +1,452 @@
+'use strict';
+const assert=require('assert');
+const fs=require('fs');
+const path=require('path');
+const E=require('../js/epoxy-engine');
+const Q=require('../js/quote-core');
+const S=require('../js/price-sanity');
+
+let failed=0;
+function check(name,fn){try{fn();console.log('ok',name);}catch(e){failed++;console.error('FAIL',name,e&&e.stack||e);}}
+async function checkAsync(name,fn){try{await fn();console.log('ok',name);}catch(e){failed++;console.error('FAIL',name,e&&e.stack||e);}}
+
+function floorJob(sqft,style,extra){
+  const j=E.newJob();
+  Object.assign(j,{customer:'Synthetic',company:'',method:'rates',priceOption:'regular',condition:'sound',patchKits:0,addOnIncluded:false,miles:0,minutes:0,tax:0,discount:0});
+  Object.assign(j.areas[0],{name:'Floor area',sqft:sqft,style:style||'solid',flake:'light',coats:1,level:false,moisture:false,grip:false,rate:null,depth:0.25});
+  if(extra)Object.assign(j,extra);
+  if(extra&&extra.area)Object.assign(j.areas[0],extra.area);
+  return j;
+}
+function repro(rate){
+  const j=E.newJob();
+  Object.assign(j,{customer:'a',company:'splash',method:'rates',priceOption:'regular',condition:'sound',patchKits:2,addOnIncluded:false,miles:0,minutes:0});
+  j.areas=[Object.assign(E.newArea(),{name:'Floor area',sqft:1000,style:'flake',flake:'full',level:true,depth:0.25,moisture:true,rate:rate})];
+  return j;
+}
+function reproSettings(){
+  return Q.buildSettings(E,{rates:{flake:10,level:6,patch:150,solid:7,sealer:3,removal:2,metallic:15,moisture:4,extraCoat:1.5,fullFlakeExtra:1,mediumFlakeExtra:0.5}},{});
+}
+function msgs(x){return (x.blockingIssues||[]).map(b=>b.message).join(' | ')}
+function warns(x){return ((x.sanity&&x.sanity.warnings)||[]).map(w=>w.message).join(' | ')}
+const JOB='00000000-0000-4000-8000-0000000000aa';
+function server(job,role,staff){
+  let recorded=0;
+  const jobs={[JOB]:{id:JOB,version:1,job_data:job}};
+  const deps={
+    getProfile:async()=>({id:role==='owner'?'own-1':'emp-1',role:role,active:true}),
+    getJob:async()=>jobs[JOB],
+    getPriceBook:async()=>({version:1,staff_settings:staff||{},owner_settings:{}}),
+    getJobMarkup:async()=>null,
+    recordQuote:async()=>{recorded+=1;return 'quote-synthetic'},
+    discountStore:null
+  };
+  return {deps,recorded:()=>recorded};
+}
+
+check('shared engine, quote core, and price guard stay byte-identical',()=>{
+  for(const name of ['epoxy-engine.js','quote-core.js','price-sanity.js']){
+    const a=fs.readFileSync(path.join('js',name),'utf8');
+    const b=fs.readFileSync(path.join('supabase/functions/_shared',name),'utf8');
+    assert.strictEqual(a,b,name);
+  }
+});
+
+check('repro rate 1000 is blocked and is not priced',()=>{
+  const x=E.calculate(repro(1000),reproSettings());
+  assert.notStrictEqual(x.total,1010300);
+  assert.strictEqual(x.total,21300);
+  assert.strictEqual(x.quoteReady,false);
+  assert.ok(x.finalizedBlocked);
+  assert.ok(msgs(x).includes('Floor area'));
+  assert.ok(msgs(x).includes('This looks like square footage, not a price per sq ft.'),msgs(x));
+  assert.ok(!x.lines.some(l=>l.rate===1000));
+  assert.notStrictEqual(x.choices.opt1.total,1010300);
+  assert.notStrictEqual(x.choices.opt2.total,1010300);
+});
+
+check('blank custom rate still prices the repro at $21,300',()=>{
+  const x=E.calculate(repro(null),reproSettings());
+  assert.strictEqual(x.total,21300);
+  assert.strictEqual(x.perSqft,21.3);
+  assert.strictEqual(x.quoteReady,true);
+  assert.strictEqual((x.blockingIssues||[]).length,0);
+  assert.strictEqual(x.choices.opt1.total,19300);
+  assert.strictEqual(x.choices.opt2.total,20300);
+});
+
+check('approved tier totals are unchanged',()=>{
+  const rows=[
+    [100,'solid','regular',700],
+    [100,'flake','regular',1000],
+    [100,'metallic','regular',1500],
+    [100,'solid','opt1',500],
+    [100,'flake','opt1',800],
+    [100,'metallic','opt1',1100],
+    [100,'solid','opt2',600],
+    [100,'flake','opt2',900],
+    [100,'metallic','opt2',1300]
+  ];
+  for(const [sqft,style,tier,total] of rows){
+    const j=floorJob(sqft,style,{priceOption:tier});
+    const x=E.calculate(j,E.defaults);
+    assert.strictEqual(x.total,total,tier+' '+style);
+    assert.strictEqual((x.blockingIssues||[]).length,0);
+    assert.strictEqual((x.sanity.warnings||[]).length,0,warns(x));
+  }
+  const painted=floorJob(100,'solid',{priceOption:'opt1',condition:'paint'});
+  assert.strictEqual(E.calculate(painted,E.defaults).total,700);
+  const wide=floorJob(1200,'metallic',{priceOption:'opt1',addOnIncluded:true});
+  const settings=JSON.parse(JSON.stringify(E.defaults));
+  settings.addOn.low=9;
+  const x=E.calculate(wide,settings);
+  assert.strictEqual(x.choices.regular.total,28800);
+  assert.strictEqual(x.choices.opt1.total,24000);
+  assert.strictEqual(x.choices.opt2.total,26400);
+  assert.strictEqual((x.blockingIssues||[]).length,0);
+});
+
+check('custom rate boundaries and the square-footage message',()=>{
+  const at=rate=>{const j=floorJob(100,'solid',{area:{rate}});return E.calculate(j,E.defaults)};
+  assert.strictEqual(at(3).total,300);
+  assert.strictEqual(at(3).quoteReady,true);
+  assert.ok(warns(at(3)).includes('outside the usual $5–$15'),warns(at(3)));
+  assert.strictEqual(at(20).total,2000);
+  assert.strictEqual(at(20).blockingIssues.length,0);
+  assert.ok(warns(at(20)).includes('outside the usual $5–$15'));
+  assert.strictEqual(at(5).total,500);
+  assert.strictEqual(at(5).sanity.warnings.length,0);
+  assert.strictEqual(at(15).total,1500);
+  assert.strictEqual(at(15).sanity.warnings.length,0);
+  const low=at(2.99);
+  assert.strictEqual(low.quoteReady,false);
+  assert.strictEqual(low.total,700);
+  assert.ok(msgs(low).includes('Floor area'));
+  assert.ok(msgs(low).includes('outside $3–$20'));
+  assert.ok(!msgs(low).includes('square footage'));
+  const high=at(20.01);
+  assert.strictEqual(high.quoteReady,false);
+  assert.strictEqual(high.total,700);
+  assert.ok(msgs(high).includes('outside $3–$20'));
+  const hundred=at(100);
+  assert.ok(msgs(hundred).includes('This looks like square footage, not a price per sq ft.'));
+  const same=E.calculate(floorJob(12,'solid',{area:{rate:12,sqft:12}}),E.defaults);
+  assert.ok(msgs(same).includes('This looks like square footage, not a price per sq ft.'));
+  assert.notStrictEqual(same.total,144);
+  assert.strictEqual(same.total,84);
+  assert.strictEqual(same.choices.opt1.total,60);
+});
+
+check('a valid custom rate is still kept on every tier',()=>{
+  const j=floorJob(100,'flake',{area:{rate:12},priceOption:'opt1'});
+  const x=E.calculate(j,E.defaults);
+  assert.strictEqual(x.total,1200);
+  assert.strictEqual(x.choices.regular.total,1200);
+  assert.strictEqual(x.choices.opt1.total,1200);
+  assert.strictEqual(x.choices.opt2.total,1200);
+  assert.strictEqual(x.lines.find(l=>l.kind==='finish').customRate,true);
+});
+
+check('add-in of $2,250 on 450 sq ft is blocked and not multiplied',()=>{
+  const settings=JSON.parse(JSON.stringify(E.defaults));
+  settings.addOn.low=2250;
+  const j=floorJob(450,'flake',{addOnIncluded:true});
+  const x=E.calculate(j,settings);
+  assert.notStrictEqual(x.total,1017000);
+  assert.strictEqual(x.total,4500);
+  assert.ok(msgs(x).includes('Standard add-in / sq ft'));
+  assert.ok(msgs(x).includes('outside $0–$40'));
+  assert.strictEqual(x.quoteReady,false);
+});
+
+check('option tier rate of $2,250 on 450 sq ft is blocked and not multiplied',()=>{
+  const settings=JSON.parse(JSON.stringify(E.defaults));
+  settings.pricingOptions.opt1.rates.flake=2250;
+  const j=floorJob(450,'flake',{priceOption:'opt1'});
+  const x=E.calculate(j,settings);
+  assert.notStrictEqual(x.choices.opt1.total,1012500);
+  assert.strictEqual(x.choices.opt1.total,4500);
+  assert.strictEqual(x.total,4500);
+  assert.ok(msgs(x).includes('outside $0–$40'),msgs(x));
+  assert.strictEqual(x.quoteReady,false);
+});
+
+check('removal at $900 per sq ft is blocked and not multiplied',()=>{
+  const settings=JSON.parse(JSON.stringify(E.defaults));
+  settings.rates.removal=900;
+  const j=floorJob(450,'flake',{condition:'paint'});
+  const x=E.calculate(j,settings);
+  assert.notStrictEqual(x.total,409500);
+  assert.strictEqual(x.total,4500);
+  assert.ok(msgs(x).includes('Extra removal / sq ft'),msgs(x));
+  assert.strictEqual(x.quoteReady,false);
+});
+
+check('per-sqft book boundaries warn above $20 and block above $40',()=>{
+  const run=v=>{const s=JSON.parse(JSON.stringify(E.defaults));s.rates.removal=v;return E.calculate(floorJob(100,'solid',{condition:'paint'}),s)};
+  assert.strictEqual(run(20).blockingIssues.length,0);
+  assert.strictEqual(run(20).sanity.warnings.length,0);
+  assert.strictEqual(run(20).total,700+2000);
+  const warn=run(20.01);
+  assert.strictEqual(warn.blockingIssues.length,0);
+  assert.ok(warns(warn).includes('above the usual $20'),warns(warn));
+  assert.strictEqual(warn.total,700+2001);
+  const edge=run(40);
+  assert.strictEqual(edge.blockingIssues.length,0);
+  assert.ok(warns(edge).includes('above the usual $20'));
+  const blocked=run(40.01);
+  assert.ok(msgs(blocked).includes('outside $0–$40'));
+  assert.strictEqual(blocked.total,700);
+});
+
+check('leveling depth above 2 inches is capped and blocked',()=>{
+  const j=floorJob(450,'flake',{area:{level:true,depth:25}});
+  const x=E.calculate(j,E.defaults);
+  assert.notStrictEqual(x.total,274500);
+  const level=x.lines.find(l=>/Self-leveling/.test(l.label));
+  assert.strictEqual(level.rate,48);
+  assert.strictEqual(level.total,21600);
+  assert.ok(msgs(x).includes('leveling depth 25 in is above the 2 in cap'),msgs(x));
+  assert.strictEqual(x.quoteReady,false);
+  const ok=E.calculate(floorJob(450,'flake',{area:{level:true,depth:2}}),E.defaults);
+  assert.strictEqual(ok.lines.find(l=>/Self-leveling/.test(l.label)).rate,48);
+  assert.ok(!msgs(ok).includes('leveling depth'));
+});
+
+check('square footage over 20,000 warns and over 100,000 blocks, with the square-inch hint',()=>{
+  const at=sf=>E.calculate(floorJob(sf,'solid'),E.defaults);
+  assert.ok(!warns(at(20000)).includes('square inches'),warns(at(20000)));
+  assert.ok(!msgs(at(20000)).includes('square inches'));
+  const warn=at(20001);
+  assert.ok(warns(warn).includes('square inches? divide by 144'),warns(warn));
+  assert.ok(warns(warn).includes('Floor area'));
+  assert.ok(!msgs(warn).includes('over 100,000'));
+  const inches=E.calculate(floorJob(64800,'flake'),E.defaults);
+  assert.strictEqual(inches.total,648000);
+  assert.ok(warns(inches).includes('square inches? divide by 144'),warns(inches));
+  assert.ok(msgs(inches).includes('over $250,000'),msgs(inches));
+  assert.strictEqual(inches.quoteReady,false);
+  const block=at(100001);
+  assert.ok(msgs(block).includes('over 100,000'));
+  assert.ok(msgs(block).includes('square inches? divide by 144'));
+});
+
+check('catalog garage adjustment stays a flat dollar amount',()=>{
+  const settings=JSON.parse(JSON.stringify(E.defaults));
+  settings.catalog.garage.twoCarStarting=4000;
+  settings.catalog.garage.materialAdj.flake=2250;
+  const j=E.newJob();
+  Object.assign(j,{customer:'Pat',projectType:'garage',garagePackage:'2car',garageStyle:'flake',garageTopcoat:'protective',garageCondition:'good',miles:0,minutes:0});
+  j.areas[0].sqft=450;
+  const x=E.calculate(j,settings);
+  assert.strictEqual(x.quoteReady,true);
+  assert.strictEqual(x.total,6250);
+  assert.notStrictEqual(x.total,4000+2250*450);
+  const adj=x.lines.find(l=>l.kind==='adjustment');
+  assert.strictEqual(adj.qty,1);
+  assert.strictEqual(adj.total,2250);
+  assert.strictEqual((x.blockingIssues||[]).length,0);
+  const fake=S.review(j,{sqft:0,total:2250*450,lines:[{kind:'adjustment',label:'Material / system (flake)',qty:450,unit:'sq ft',rate:2250,total:2250*450}]});
+  assert.ok(fake.blocks.some(b=>/multiplied by sq ft/.test(b.message)));
+});
+
+check('a negative catalog adjustment is still clamped and does not reduce the price',()=>{
+  const settings=JSON.parse(JSON.stringify(E.defaults));
+  settings.catalog.garage.twoCarStarting=4000;
+  settings.catalog.garage.materialAdj.flake=-500;
+  const j=E.newJob();
+  Object.assign(j,{customer:'Pat',projectType:'garage',garagePackage:'2car',garageStyle:'flake',garageTopcoat:'protective',garageCondition:'good',miles:0,minutes:0});
+  const x=E.calculate(j,settings);
+  assert.strictEqual(x.total,4000);
+  assert.notStrictEqual(x.total,3500);
+});
+
+check('a normal 2-car garage passes',()=>{
+  const settings=JSON.parse(JSON.stringify(E.defaults));
+  settings.catalog.garage.twoCarStarting=4500;
+  settings.catalog.garage.materialAdj.flake=0;
+  const j=E.newJob();
+  Object.assign(j,{customer:'Pat',projectType:'garage',garagePackage:'2car',garageStyle:'flake',garageTopcoat:'protective',garageCondition:'good',miles:0,minutes:0});
+  const x=E.calculate(j,settings);
+  assert.strictEqual(x.quoteReady,true);
+  assert.strictEqual(x.total,4500);
+  assert.strictEqual(x.blockingIssues.length,0);
+  assert.strictEqual(x.sanity.warnings.length,0);
+});
+
+check('garage, flatwork, and seating sanity boundaries',()=>{
+  function garage(start){
+    const settings=JSON.parse(JSON.stringify(E.defaults));
+    settings.catalog.garage.twoCarStarting=start;
+    settings.catalog.garage.materialAdj.flake=0;
+    const j=E.newJob();
+    Object.assign(j,{customer:'Pat',projectType:'garage',garagePackage:'2car',garageStyle:'flake',garageTopcoat:'protective',garageCondition:'good',miles:0,minutes:0});
+    return E.calculate(j,settings);
+  }
+  assert.strictEqual(garage(8000).sanity.warnings.length,0);
+  assert.ok(warns(garage(8000.01)).includes('over $8,000'));
+  assert.strictEqual(garage(15000).blockingIssues.length,0);
+  assert.ok(msgs(garage(15000.01)).includes('over $15,000'));
+  function flat(start){
+    const settings=JSON.parse(JSON.stringify(E.defaults));
+    settings.catalog.flatwork.sizeBands[0].starting=start;
+    settings.catalog.flatwork.materialAdj.solid=0;
+    const j=E.newJob();
+    j.customer='Pat';j.projectType='flatwork';j.miles=0;j.minutes=0;
+    const it=E.newFlatItem();it.condition='good';it.length=2;it.width=2;
+    j.catalogItems=[it];
+    return E.calculate(j,settings);
+  }
+  assert.ok(!warns(flat(3000)).includes('over $3,000'));
+  assert.ok(warns(flat(3000.01)).includes('over $3,000'));
+  function seat(start){
+    const settings=JSON.parse(JSON.stringify(E.defaults));
+    settings.catalog.seating.byType.chair=start;
+    settings.catalog.seating.materialAdj.solid=0;
+    const j=E.newJob();
+    j.customer='Pat';j.projectType='seating';j.miles=0;j.minutes=0;
+    const it=E.newSeatItem();it.condition='good';it.qty=1;
+    j.catalogItems=[it];
+    return E.calculate(j,settings);
+  }
+  assert.ok(!warns(seat(500)).includes('over $500'));
+  assert.ok(warns(seat(500.01)).includes('over $500'));
+});
+
+check('blended and measured-total boundaries',()=>{
+  const settings=JSON.parse(JSON.stringify(E.defaults));
+  settings.addOn.low=30;
+  const warn=E.calculate(floorJob(100,'solid',{addOnIncluded:true}),settings);
+  assert.strictEqual(warn.total,3700);
+  assert.strictEqual(warn.perSqft,37);
+  assert.ok(warns(warn).includes('over $30'));
+  assert.strictEqual(warn.blockingIssues.length,0);
+  settings.addOn.low=0;
+  const under=E.calculate(floorJob(100,'sealer'),E.defaults);
+  assert.strictEqual(under.total,300);
+  assert.ok(warns(under).includes('under $4'));
+  const high=JSON.parse(JSON.stringify(E.defaults));
+  high.addOn.low=40;
+  const block=E.calculate(floorJob(100,'metallic',{addOnIncluded:true}),high);
+  assert.strictEqual(block.total,1500+4000);
+  assert.ok(msgs(block).includes('over $50'),msgs(block));
+  const big=E.calculate(floorJob(11000,'solid'),E.defaults);
+  assert.strictEqual(big.total,77000);
+  assert.ok(warns(big).includes('over $75,000'));
+  assert.strictEqual(big.blockingIssues.filter(b=>b.code==='job_total').length,0);
+  const huge=E.calculate(floorJob(40000,'solid'),E.defaults);
+  assert.ok(msgs(huge).includes('over $250,000'));
+});
+
+(async()=>{
+  async function record(job,role,staff,extra){
+    const ctx=server(job,role,staff);
+    const res=await Q.handleQuoteRequest(Object.assign({mode:'record',job_id:JOB},extra||{}),ctx.deps,E);
+    return {res,recorded:ctx.recorded()};
+  }
+  async function preview(job,role,staff){
+    const ctx=server(job,role,staff);
+    const res=await Q.handleQuoteRequest({mode:'preview',job_id:JOB,job_data:job},ctx.deps,E);
+    return res;
+  }
+
+  await checkAsync('server rejects the $1,000 override for an owner and keeps the blank rate',async()=>{
+    const staff={rates:{flake:10,level:6,patch:150,solid:7,sealer:3,removal:2,metallic:15,moisture:4,extraCoat:1.5,fullFlakeExtra:1,mediumFlakeExtra:0.5}};
+    const blocked=await record(repro(1000),'owner',staff);
+    assert.strictEqual(blocked.res.status,422);
+    assert.strictEqual(blocked.res.body.code,'price_blocked');
+    assert.strictEqual(blocked.recorded,0);
+    assert.ok(blocked.res.body.error.includes('This looks like square footage, not a price per sq ft.'));
+    const employee=await record(repro(1000),'employee',staff,{sanityContinue:true});
+    assert.strictEqual(employee.res.status,422);
+    assert.strictEqual(employee.recorded,0);
+    const open=await record(repro(null),'owner',staff);
+    assert.strictEqual(open.res.status,200);
+    assert.strictEqual(open.res.body.customer.totals.total,21300);
+    assert.strictEqual(open.recorded,1);
+    const seen=await preview(repro(1000),'owner',staff);
+    assert.strictEqual(seen.status,200);
+    assert.ok((seen.body.staff.pendingReasons||[]).join(' ').includes('This looks like square footage, not a price per sq ft.'));
+  });
+
+  await checkAsync('server blocks a $2,250 per-sqft add-in',async()=>{
+    const job=floorJob(450,'flake',{addOnIncluded:true});
+    const out=await record(job,'owner',{addOn:{low:2250,high:2}});
+    assert.strictEqual(out.res.status,422);
+    assert.strictEqual(out.recorded,0);
+    assert.ok(out.res.body.error.includes('Standard add-in / sq ft'),out.res.body.error);
+    assert.ok(out.res.body.error.includes('outside $0–$40'));
+    const seen=await preview(job,'owner',{addOn:{low:2250,high:2}});
+    assert.notStrictEqual(seen.body.staff.total,1017000);
+    assert.strictEqual(seen.body.staff.total,4500);
+  });
+
+  await checkAsync('server blocks an option tier rate of $2,250',async()=>{
+    const job=floorJob(450,'flake',{priceOption:'opt1'});
+    const staff={pricingOptions:{opt1:{rates:{flake:2250}}}};
+    const out=await record(job,'owner',staff);
+    assert.strictEqual(out.res.status,422);
+    assert.strictEqual(out.recorded,0);
+    assert.ok(/outside \$0–\$40/.test(out.res.body.error),out.res.body.error);
+    const seen=await preview(job,'owner',staff);
+    assert.notStrictEqual(seen.body.staff.total,1012500);
+    assert.strictEqual(seen.body.staff.total,4500);
+  });
+
+  await checkAsync('server records a catalog adjustment once, not times sq ft',async()=>{
+    const job=E.newJob();
+    Object.assign(job,{customer:'Pat',projectType:'garage',garagePackage:'2car',garageStyle:'flake',garageTopcoat:'protective',garageCondition:'good',miles:0,minutes:0});
+    job.areas[0].sqft=450;
+    const staff={catalog:{garage:{twoCarStarting:4000,materialAdj:{flake:2250}}}};
+    const out=await record(job,'owner',staff);
+    assert.strictEqual(out.res.status,200,JSON.stringify(out.res.body));
+    assert.strictEqual(out.recorded,1);
+    assert.strictEqual(out.res.body.customer.totals.total,6250);
+    assert.notStrictEqual(out.res.body.customer.totals.total,4000+2250*450);
+    const adj=out.res.body.customer.catalogAdjustments.find(l=>/flake/i.test(l.label));
+    assert.strictEqual(adj.qty,1);
+    assert.strictEqual(adj.total,2250);
+  });
+
+  await checkAsync('server blocks 64,800 sq ft entered as square inches',async()=>{
+    const job=floorJob(64800,'flake');
+    const out=await record(job,'owner',{});
+    assert.strictEqual(out.res.status,422);
+    assert.strictEqual(out.recorded,0);
+    assert.ok(out.res.body.blockingIssues.join(' ').includes('square inches? divide by 144')||out.res.body.error.includes('over $250,000'),JSON.stringify(out.res.body));
+    const seen=await preview(job,'employee',{});
+    const text=[...(seen.body.staff.pendingReasons||[]),...(seen.body.staff.warnings||[])].join(' ');
+    assert.ok(text.includes('square inches? divide by 144'),text);
+    assert.ok(text.includes('over $250,000')||text.includes('over 100,000'),text);
+  });
+
+  await checkAsync('server blocks a 25 inch leveling depth and a $900 removal rate',async()=>{
+    const deep=await record(floorJob(450,'flake',{area:{level:true,depth:25}}),'owner',{});
+    assert.strictEqual(deep.res.status,422);
+    assert.strictEqual(deep.recorded,0);
+    assert.ok(deep.res.body.error.includes('leveling depth 25 in is above the 2 in cap'),deep.res.body.error);
+    const peel=await record(floorJob(450,'flake',{condition:'paint'}),'owner',{rates:{removal:900}});
+    assert.strictEqual(peel.res.status,422);
+    assert.strictEqual(peel.recorded,0);
+    assert.ok(peel.res.body.error.includes('Extra removal / sq ft'),peel.res.body.error);
+  });
+
+  await checkAsync('a price warning needs the owner, and an employee cannot override it',async()=>{
+    const job=floorJob(100,'solid',{area:{rate:4}});
+    const employee=await record(job,'employee',{},{sanityContinue:true});
+    assert.strictEqual(employee.res.status,422);
+    assert.strictEqual(employee.res.body.code,'price_warning');
+    assert.strictEqual(employee.recorded,0);
+    assert.ok(employee.res.body.error.includes('Employees cannot override'));
+    const owner=await record(job,'owner',{});
+    assert.strictEqual(owner.res.status,422);
+    assert.strictEqual(owner.recorded,0);
+    const confirmed=await record(job,'owner',{},{sanityContinue:true});
+    assert.strictEqual(confirmed.res.status,200);
+    assert.strictEqual(confirmed.res.body.customer.totals.total,400);
+    assert.strictEqual(confirmed.recorded,1);
+  });
+
+  if(failed){console.error(failed+' failed');process.exit(1)}
+  console.log('all price sanity checks passed');
+})().catch(err=>{console.error(err);process.exit(1)});

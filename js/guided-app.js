@@ -294,9 +294,62 @@ function paintSavePill(text,state){
 }
 /* Server row is created only after a name and a phone, email, or address. "+ New job" alone stays on this device. */
 function readyForServer(j){return !!(j&&(j._serverId||contactSufficient(j)))}
+function warnFingerprint(warns){return (warns||[]).map(w=>w&&w.message?w.message:String(w||'')).join('\n')}
+function ownerAcked(j,warns){
+  if(!warns||!warns.length)return true;
+  return !!(j&&j.sanityAck&&j.sanityAck.role==='owner'&&j.sanityAck.fingerprint===warnFingerprint(warns));
+}
+function refreshDraftMark(j){
+  if(!j)return;
+  const x=E.calculate(j,state.settings);
+  const blocks=x.blockingIssues||[];
+  const warns=(x.sanity&&x.sanity.warnings)||[];
+  if(blocks.length||(warns.length&&!ownerAcked(j,warns)))j.draftMark='needs fixing';
+  else if(j.draftMark==='needs fixing')j.draftMark='draft';
+}
+function issueGate(j){
+  if(!j)return {ok:false,code:'blocked',message:'No job to issue.'};
+  syncPrepIntoEngineFields(j);
+  const x=E.calculate(j,state.settings);
+  const blocks=x.blockingIssues||[];
+  if(blocks.length)return {ok:false,code:'blocked',message:blocks[0].message,blocks,acked:false};
+  const warns=(x.sanity&&x.sanity.warnings)||[];
+  if(warns.length&&!ownerAcked(j,warns)){
+    const tail=isOwner()?' Tap Looks right, continue.':' Employees cannot override a price warning.';
+    return {ok:false,code:'warning',message:warns[0].message+tail,warnings:warns,acked:false};
+  }
+  return {ok:true,acked:warns.length>0,message:''};
+}
+function perSqftAcked(){
+  const S=window.EsPriceSanity;
+  if(!S)return true;
+  const found=S.bookIssues(state.settings);
+  if(!found.warnings.length)return true;
+  if(found.blocks.length)return false;
+  return state.perSqftAck===S.fingerprint(found.warnings);
+}
+function ackPerSqft(){
+  const S=window.EsPriceSanity;
+  if(!S||!isOwner())return;
+  const found=S.bookIssues(state.settings);
+  if(found.blocks.length){toast(found.blocks[0].message);return}
+  state.perSqftAck=S.fingerprint(found.warnings);
+  toast('Rate confirmed. You can save the price book.');
+}
 function save(opts){
   const j=activeJob();
   if(j){j.updatedAt=nowISO();syncPrepIntoEngineFields(j)}
+  if(j&&opts&&opts.issue){
+    const gate=issueGate(j);
+    if(!gate.ok){
+      j.draftMark='needs fixing';
+      if(!opts.silent)toast(gate.message);
+    }else{
+      j.draftMark='issued';
+      j.issuedAt=nowISO();
+      if(!opts.silent)toast('Saved as issued.');
+    }
+  }else if(j)refreshDraftMark(j);
   if(authMode()){ // never write price book / owner settings to this device; server save via runtime hook
     if(readyForServer(j)&&runtime.onSave)runtime.onSave(j,opts||{});
     else paintSavePill('Saved','saved');
@@ -363,7 +416,47 @@ let toastTimer;
 function toast(s){$('toast').textContent=s;$('toast').classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').classList.remove('show'),3800)}
 function field(label,path,type='text',help='',attrs=''){
   const v=getPath(path);
-  return `<div class="field"><label for="f-${escape(path)}">${label}</label><input id="f-${escape(path)}" data-path="${escape(path)}" type="${type}" value="${escape(v)}" ${type==='number'?'min="0" step="any"':''} ${attrs}>${help?`<small>${help}</small>`:''}</div>`;
+  let num='';
+  if(type==='number'){
+    if(!/(^|\s)min=/.test(attrs))num+='min="0" ';
+    if(!/(^|\s)step=/.test(attrs))num+='step="any" ';
+  }
+  return `<div class="field"><label for="f-${escape(path)}">${label}</label><input id="f-${escape(path)}" data-path="${escape(path)}" type="${type}" value="${escape(v)}" ${num}${attrs}>${help?`<small>${help}</small>`:''}</div>`;
+}
+function normalTierRate(a){
+  const j=activeJob();
+  const style=['solid','flake','metallic','sealer','level'].includes(a.style)?a.style:'solid';
+  const book=state.settings.rates||{};
+  const opt=j&&j.priceOption&&j.priceOption!=='regular'&&state.settings.pricingOptions?state.settings.pricingOptions[j.priceOption]:null;
+  const tier=opt&&opt.rates&&opt.rates[style]!=null&&opt.rates[style]!==''?E.n(opt.rates[style]):null;
+  const base=tier==null?E.n(book[style]):tier;
+  let extra=0;
+  if(style==='solid')extra=Math.max(0,E.n(a.coats)-1)*E.n(book.extraCoat!=null?book.extraCoat:1.5);
+  if(style==='flake')extra=a.flake==='full'?E.n(book.fullFlakeExtra!=null?book.fullFlakeExtra:1):(a.flake==='medium'?E.n(book.mediumFlakeExtra!=null?book.mediumFlakeExtra:0.5):0);
+  if(style==='level')return base*(Math.min(E.n(a.depth),2)/0.25);
+  return base+extra;
+}
+function rateOverrideField(a,base){
+  const path=base+'.rate';
+  const v=getPath(path);
+  const normal=normalTierRate(a);
+  const S=window.EsPriceSanity;
+  const problem=S?S.customRateProblem(a):null;
+  return `<div class="field rate-override"><label for="f-${escape(path)}">Override $/sq ft (optional)</label>
+    <div class="rate-row"><input id="f-${escape(path)}" data-path="${escape(path)}" type="number" inputmode="decimal" min="3" max="20" step="0.01" value="${escape(v)}">
+    <span class="rate-hint">Normal for this area ${cash(normal)} / sq ft</span></div>
+    <small>Leave blank to use that rate. Allowed override is $3–$20 per sq ft.</small>
+    ${problem?`<p class="warn-banner rate-error" role="alert">${escape(problem.message)}</p>`:''}
+  </div>`;
+}
+function bookIssuesHTML(){
+  const S=window.EsPriceSanity;
+  if(!S||!isOwner())return '';
+  const found=S.bookIssues(state.settings);
+  if(!found.blocks.length&&!found.warnings.length)return '';
+  const rows=[...found.blocks,...found.warnings].map(i=>escape(i.message)).join('<br>');
+  const btn=found.warnings.length&&!found.blocks.length&&!perSqftAcked()?'<button type="button" class="button secondary" id="ackPerSqft">Looks right, continue</button>':'';
+  return `<div class="${found.blocks.length?'warn-banner':'notice'}" role="alert">${rows}</div>${btn}`;
 }
 function select(label,path,options,help=''){
   return `<div class="field"><label for="f-${escape(path)}">${label}</label><select id="f-${escape(path)}" data-path="${escape(path)}">${options.map(([v,t])=>`<option value="${escape(v)}" ${String(getPath(path))===String(v)?'selected':''}>${escape(t)}</option>`).join('')}</select>${help?`<small>${help}</small>`:''}</div>`;
@@ -514,8 +607,9 @@ function summaryHTML(){
   <div class="summary-row"><span>Approved adjustment limit</span><strong>${adjCap?cash(adjCap):'$0'}</strong></div>
   <div class="summary-row"><span>Applied adjustment</span><strong>${cash(E.n(j.discount))}</strong></div>
   <button class="button secondary small" data-view="internal">Field plan / travel →</button></div>`;
-  const catalogPending=isCatalogJob(j)&&!x.quoteReady;
-  const floorIncomplete=!isCatalogJob(j)&&!x.quoteReady;
+  const blocked=(x.blockingIssues||[]).length>0;
+  const catalogPending=isCatalogJob(j)&&!x.quoteReady&&!blocked;
+  const floorIncomplete=!isCatalogJob(j)&&!x.sqft;
   const pending=catalogPending;
   const typeLabel={floor:'Measured floors',garage:'Garage',flatwork:'Tables / counters / bars',seating:'Chairs / stools'}[j.projectType]||j.projectType;
   const totalBlock=catalogPending
@@ -523,7 +617,13 @@ function summaryHTML(){
     :floorIncomplete
       ?`<div class="big-total">${cash(x.total)}</div><div class="per-sqft">Add measurements to calculate</div>`
       :`<div class="big-total">${cash(x.total)}</div><div class="per-sqft">${x.sqft?cash(x.perSqft)+' / sq ft · '+num(x.sqft)+' sq ft total':(x.catalog?escape(x.catalog.startingLabel||'Catalog package'):'')}</div>`;
-  return `<div class="quote-summary"><span class="summary-label">${catalogPending?'QUOTE STATUS · PENDING':'CUSTOMER ESTIMATE'}</span>${totalBlock}<div class="summary-rule"></div>
+  const warns=(x.sanity&&x.sanity.warnings)||[];
+  const continueBtn=isOwner()&&warns.length&&!blocked&&!ownerAcked(j,warns)?'<button type="button" class="button secondary" id="sanityContinue">Looks right, continue</button>':'';
+  const employeeNote=!isOwner()&&warns.length&&!ownerAcked(j,warns)?'<p class="method-note">Employees cannot override a price warning.</p>':'';
+  const mark=j.draftMark==='needs fixing'?' · NEEDS FIXING':(j.draftMark==='issued'?' · ISSUED':'');
+  return `<div class="quote-summary"><span class="summary-label">${blocked?'QUOTE STATUS · NEEDS FIXING':catalogPending?'QUOTE STATUS · PENDING':'CUSTOMER ESTIMATE'}${mark}</span>${totalBlock}<div class="summary-rule"></div>
+  ${blocked?priceNeededBanner(x):''}
+  ${continueBtn}${employeeNote}
   ${catalogPending?priceNeededBanner(x):''}
   ${[['Project type',escape(typeLabel)],['Price',escape(x.selected.short)],...(x.selected.key!=='regular'&&!pending?[['Below the regular full total',cash(x.selected.savings)+' ('+num(x.selected.savingsPct)+'% of that full total)']]:[]),['Property add-in',x.addOn.included?cash(x.addOn.total)+' @ '+cash(x.addOn.rate)+'/sq ft':'Not included'],['Areas / items',isCatalogJob(j)?String((j.catalogItems||[]).length||(j.projectType==='garage'?1:0)):j.areas.length],['Moisture areas',String((moistureSelectedAreas(j).items||[]).length)],['Cloud','OFF']].map(([k,v])=>`<div class="summary-row"><span>${k}</span><strong>${v}</strong></div>`).join('')}
   <p class="summary-note">${pending?'Unconfigured catalog jobs stay pending — never show a misleading $0 final as if priced.':'Quoted total is a blended customer price. Travel/mobilization (when calculated) is included in the total — not shown as a separate customer line.'}</p>
@@ -601,7 +701,7 @@ function areaMeasureHTML(a,i){
     <p class="hint">Measure in feet, wall to wall. For a rectangle, enter length and width. For an odd room, add a section for each bay and the sizes add up.</p>
     <div class="fields">${areaNameInput(a,base+'.name')}${select('How to enter size',base+'.sqftMode',[['manual','Enter total sq ft'],['rectangles','Length × width sections']])}</div>
     ${a.sqftMode==='rectangles'?`<div class="measure-block"><p class="hint">One row per bay or alcove.</p>${rects}<button type="button" class="quiet" data-add-rect="${i}">+ Add section</button><p class="method-note">Area total: <b>${num(sqft,2)} sq ft</b></p></div>`
-      :`<div class="fields">${field('Square feet',base+'.sqft','number','Total measured floor area for this named space','step="1" inputmode="decimal"')}</div>`}
+      :`<div class="fields">${field('Square feet',base+'.sqft','number','Total measured floor area for this named space.'+(computeAreaSqft(a)>20000?' Square inches? Divide by 144.':''),'step="1" inputmode="decimal"')}</div>`}
     <details class="more-options"><summary>More options</summary><div class="detail-body">
       ${tapeGuideHTML()}
       ${areaMoistureHTML(a,i)}
@@ -615,6 +715,10 @@ function areaMeasureHTML(a,i){
 function isCatalogJob(j){const t=E.projectTypeOf(j);return t==='flatwork'||t==='seating'||(t==='garage'&&!E.garageUsesMeasured(j))}
 function isMeasuredFloorLike(j){return !isCatalogJob(j)}
 function priceNeededBanner(x){
+  const blocks=x&&x.blockingIssues||[];
+  if(blocks.length){
+    return `<div class="warn-banner" role="alert"><b>Price needs fixing</b><ul>${blocks.map(b=>'<li>'+escape(b.message)+'</li>').join('')}</ul></div>`;
+  }
   if(!x||x.quoteReady)return '';
   const reasons=(x.pendingReasons||x.warnings||[]).filter(w=>/Starting price needed|Unknown|pending|unconfigured|Quote pending/i.test(w));
   const list=(reasons.length?reasons:(x.warnings||[])).slice(0,8);
@@ -818,7 +922,7 @@ function stepPrep(j){
       <details class="more-options"><summary>More options</summary><div class="detail-body">
       <div class="fields">
         ${(a.prep&&(a.prep.patching||a.prep.spalling))?field('Patch kits (this area)',base+'.prep.patchKits','number','Links to patch rate in rate book','step="1"'):''}
-        ${(a.prep&&a.prep.leveling)?field('Avg leveling depth (in)',base+'.prep.levelDepth','number','¼ inch = 0.25','step="0.125"'):''}
+        ${(a.prep&&a.prep.leveling)?field('Avg leveling depth (in)',base+'.prep.levelDepth','number','¼ inch = 0.25. Maximum 2 inches.','min="0" max="2" step="0.125" inputmode="decimal"'):''}
         ${checkbox('Adhesive residue (glue left on the floor, not paint)',base+'.prep.adhesive')}
       </div>
       ${textArea('Inspection notes / concerns',base+'.conditionNotes','Also kept in the job history when the concern changes.')}
@@ -879,11 +983,11 @@ function stepSelections(j){
         ${a.style==='solid'?select('Base coats',base+'.coats',[[1,'1 base coat'],[2,'2 base coats']]):''}
         ${a.style==='flake'?select('Flake coverage',base+'.flake',[['light','Light / spot'],['medium','Medium broadcast'],['full','Full broadcast']]):''}
         ${a.style!=='level'?select('Topcoat',base+'.topcoat',[['protective','Protective topcoat (standard allowance)'],['none','No separate topcoat note']]):''}
-        ${field('Customer rate / sq ft (optional)',base+'.rate','number',`Blank uses rate book: ${cash(state.settings.rates[a.style])}`)}
+        ${rateOverrideField(a,base)}
       </div>
       <details class="more-options"><summary>More options</summary><div class="detail-body">
       ${a.style!=='level'?`<div class="area-options">${checkbox('Slip-resistant texture',base+'.grip')}${checkbox('Self-leveling before finish',base+'.level')}</div>`:''}
-      ${(a.level||a.style==='level'||(a.prep&&a.prep.leveling))?`<div class="fields depth-row">${field('Average leveling depth (inches)',base+'.depth','number','Verify average, not deepest spot','step="0.125"')}</div>`:''}
+      ${(a.level||a.style==='level'||(a.prep&&a.prep.leveling))?`<div class="fields depth-row">${field('Average leveling depth (inches)',base+'.depth','number','Verify average, not deepest spot. Maximum 2 inches.','min="0" max="2" step="0.125" inputmode="decimal"')}</div>`:''}
       ${a.grip?field('Texture note (optional)',base+'.textureNote','text','Describe the texture you want. This is not a promise the floor will not be slippery.'):''}
       ${a.moisture?`<p class="method-note">Moisture barrier is on for this area (${num(computeAreaSqft(a))} sq ft).</p>`:''}
       </div></details>
@@ -1115,9 +1219,11 @@ function stepReview(j){
   ${j.isSample?`<div class="sample-banner"><b>ILLUSTRATIVE SAMPLE</b> — label exports accordingly.</div>`:''}
   ${priceNeededBanner(x)}
   ${reviewBanner}
-  ${x.quoteReady?'':`<div class="warn-banner"><b>Finalized quote blocked</b> until required starting prices and adjustments are configured. Do not present Pending as a $0 customer total.</div>`}
+  ${x.quoteReady||(x.blockingIssues||[]).length?'':`<div class="warn-banner"><b>Finalized quote blocked</b> until required starting prices and adjustments are configured. Do not present Pending as a $0 customer total.</div>`}
   ${metrics}
   ${ownerViewHTML()}
+  <div class="inline-actions"><button type="button" class="button" id="saveAsIssued" ${(x.blockingIssues||[]).length||((x.sanity&&x.sanity.warnings||[]).length&&!ownerAcked(j,x.sanity.warnings))?'disabled':''}>Save as issued</button></div>
+  ${(x.blockingIssues||[]).length?'<p class="method-note">Save as issued, issuing, and customer links stay off until the price is fixed. The draft still saves and is marked needs fixing.</p>':''}
   ${quoteAllocationHTML(x)}
   <div class="info-banner"><b>Approved adjustment limit:</b> ${approvedAdjustmentLabel()} · applied ${cash(E.n(j.discount))}.</div>
   <div class="export-grid">
@@ -1160,9 +1266,10 @@ function ratesView(){
   +roleBadgeHTML()
   +`<div class="rate-banner"><span>◉</span><p><b>${authMode()?(owner?'Owner — edits are a draft until you save the price book to the server.':'Employee — rate book set by the owner (server-enforced).'):(owner?'Owner preview — rates editable in this demo.':'Worker preview — rate book locked.')}</b> ${owner?(authMode()?'Draft changes update estimates on this screen; employees and customer links use the saved server version.':'Changing numbers here updates estimates in this browser only.'):'Workers enter job details and create estimates using approved rates; they cannot change product prices, labor, travel, equipment, or overhead rates. Profit and margin stay owner-only.'}</p></div>
   ${authMode()?(runtime.priceBookPanelHTML?runtime.priceBookPanelHTML():''):`<div class="warn-banner"><b>OFFLINE DEMO — NOT SECURE.</b> <b>Preview only — not security.</b> This OWNER/WORKER switch demonstrates UX in a local HTML file. It is <b>not</b> authenticated access control. Real owner-only enforcement requires authenticated deployment with server-side authorization. No sign-in service is configured.</div>`}
-  <details open><summary>Customer selling rates ${owner?'':'🔒'}</summary><div class="detail-body"><div class="fields three">${Object.entries({solid:'Solid epoxy / sq ft',flake:'Flake epoxy / sq ft',metallic:'Metallic epoxy / sq ft',sealer:'Clear seal / sq ft',level:'Leveling / sq ft at ¼ inch',removal:'Extra removal / sq ft',patch:'Patch / kit installed',moisture:'Moisture control / sq ft',extraCoat:'Additional solid base coat / sq ft',mediumFlakeExtra:'Medium flake premium / sq ft',fullFlakeExtra:'Full flake premium / sq ft'}).map(([k,v])=>lockedField(v,'settings.rates.'+k,'number')).join('')}</div></div></details>
-  <details open><summary>Payment tiers & property add-in ${owner?'':'🔒'}</summary><div class="detail-body"><p>Regular is 7 / 10 / 15. Option 1 is bank transfer, 5 / 8 / 11, half at booking and half at the final walkthrough. Option 2 is 6 / 9 / 13, with 50%, 25%, and 25% within 14 days. Tiers do not stack and there is no extra 40% off. Prep and removal stay at their own prices. No material surcharge is added.</p>${['opt1','opt2'].map(k=>`<div class="fields three" style="margin-bottom:14px">${lockedField('Option label','settings.pricingOptions.'+k+'.label')}${lockedField('Solid / sq ft','settings.pricingOptions.'+k+'.rates.solid','number')}${lockedField('Flake / sq ft','settings.pricingOptions.'+k+'.rates.flake','number')}${lockedField('Metallic / sq ft','settings.pricingOptions.'+k+'.rates.metallic','number')}${state.settings.pricingOptions[k].schedule.map((p,i)=>lockedField((p.label||('Payment '+(i+1)))+' %','settings.pricingOptions.'+k+'.schedule.'+i+'.pct','number')).join('')}</div>`).join('')}
-  <div class="fields three">${lockedField('Property add-in label','settings.addOn.label')}${lockedField('Standard add-in / sq ft ($)','settings.addOn.low','number')}${lockedField('Higher add-in / sq ft ($)','settings.addOn.high','number')}</div></div></details>
+  ${bookIssuesHTML()}
+  <details open><summary>Customer selling rates ${owner?'':'🔒'}</summary><div class="detail-body"><div class="fields three">${Object.entries({solid:'Solid epoxy / sq ft',flake:'Flake epoxy / sq ft',metallic:'Metallic epoxy / sq ft',sealer:'Clear seal / sq ft',level:'Leveling / sq ft at ¼ inch',removal:'Extra removal / sq ft',moisture:'Moisture control / sq ft',extraCoat:'Additional solid base coat / sq ft',mediumFlakeExtra:'Medium flake premium / sq ft',fullFlakeExtra:'Full flake premium / sq ft'}).map(([k,v])=>lockedField(v,'settings.rates.'+k,'number','$0–$40 per sq ft. Above $20 asks the owner to confirm.','min="0" max="40" step="0.01" inputmode="decimal"')).join('')}${lockedField('Patch / kit installed','settings.rates.patch','number')}</div></div></details>
+  <details open><summary>Payment tiers & property add-in ${owner?'':'🔒'}</summary><div class="detail-body"><p>Regular is 7 / 10 / 15. Option 1 is bank transfer, 5 / 8 / 11, half at booking and half at the final walkthrough. Option 2 is 6 / 9 / 13, with 50%, 25%, and 25% within 14 days. Tiers do not stack and there is no extra 40% off. Prep and removal stay at their own prices. No material surcharge is added.</p>${['opt1','opt2'].map(k=>`<div class="fields three" style="margin-bottom:14px">${lockedField('Option label','settings.pricingOptions.'+k+'.label')}${lockedField('Solid / sq ft','settings.pricingOptions.'+k+'.rates.solid','number','$0–$40 per sq ft.','min="0" max="40" step="0.01" inputmode="decimal"')}${lockedField('Flake / sq ft','settings.pricingOptions.'+k+'.rates.flake','number','$0–$40 per sq ft.','min="0" max="40" step="0.01" inputmode="decimal"')}${lockedField('Metallic / sq ft','settings.pricingOptions.'+k+'.rates.metallic','number','$0–$40 per sq ft.','min="0" max="40" step="0.01" inputmode="decimal"')}${state.settings.pricingOptions[k].schedule.map((p,i)=>lockedField((p.label||('Payment '+(i+1)))+' %','settings.pricingOptions.'+k+'.schedule.'+i+'.pct','number')).join('')}</div>`).join('')}
+  <div class="fields three">${lockedField('Property add-in label','settings.addOn.label')}${lockedField('Standard add-in / sq ft ($)','settings.addOn.low','number','$0–$40 per sq ft.','min="0" max="40" step="0.01" inputmode="decimal"')}${lockedField('Higher add-in / sq ft ($)','settings.addOn.high','number','$0–$40 per sq ft.','min="0" max="40" step="0.01" inputmode="decimal"')}</div></div></details>
   ${authMode()&&!owner?'<div class="info-banner es-costs-hidden"><b>Internal costs are owner-only.</b> Materials, labor, travel, equipment and overhead costs, markup, profit and margin are not sent to employee devices.</div>':`<details><summary>Materials, labor, travel, equipment, overhead ${owner?'':'🔒'}</summary><div class="detail-body"><div class="fields three">${lockedCField('Loaded labor / person-hour ($)','labor')}${lockedCField('Vehicle cost / mile ($)','mile','ONE mileage rate ($0.85). Travel folds into internal overhead.')}${lockedCField('Material waste (%)','waste')}${lockedCField('Business overhead / job ($)','overhead')}${lockedCField('Contingency reserve (%)','contingency')}${lockedCField('Grinder + extractor / day ($)','rentalDay')}${lockedCField('Diamond tooling allowance ($)','tooling')}${lockedCField('Supplies allowance ($)','supplies')}${lockedCField('Dust bags / filters ($)','dust')}${lockedCField('Disposal allowance ($)','disposal')}</div>
   <p class="method-note">Product package sizes and coverages are planning allowances. Travel + equipment costs fold into internal overhead; customers never see separate equipment or mileage lines.</p>
   ${Object.entries(state.settings.products).map(([k,p])=>`<div class="product-edit"><div class="product-name">${escape(p.label)} ${owner?'':'🔒'}</div>${lockedField('Package size','settings.products.'+k+'.size','number')}${lockedField('Price / package ($)','settings.products.'+k+'.price','number')}${p.coverage?lockedField('Coverage','settings.products.'+k+'.coverage','number'):'<div class="field"><label>Coverage</label><small>From selection</small></div>'}</div>`).join('')}
@@ -1578,11 +1685,14 @@ function customerDocument(){
     const items=PREP_ITEMS.filter(p=>a.prep&&a.prep[p.key]).map(p=>p.label);
     return `• ${escape(a.name)}: condition ${escape(a.conditionRating||'unknown')}${items.length?' — '+items.map(escape).join(', '):''}${a.conditionNotes?' — '+escape(a.conditionNotes):''}`;
   }).join('<br/>');
+  const blockedDoc=(x.blockingIssues||[]).length>0;
   const totalBlock=x.quoteReady
     ?`<div class="doc-total">${x.selected.breakdown?`<div><span>Finish</span><span>${cash(x.selected.breakdown.finishAmount)}</span></div><div><span>Separate extras</span><span>${cash(x.selected.breakdown.extrasAmount)}</span></div>`:''}${x.minimum?`<div><span>Minimum project adjustment</span><span>${cash(x.minimum)}</span></div>`:''}${x.discount?`<div><span>Approved extra discount</span><span>−${cash(x.discount)}</span></div>`:''}${x.salesTax?`<div><span>Sales tax (${num(j.tax)}%)</span><span>${cash(x.salesTax)}</span></div>`:''}<div class="grand"><span>Total ${j.docType==='invoice'?'price':'estimate'}</span><span>${cash(x.total)}</span></div><p class="method-note">A previously saved customer quote is not changed by opening this screen.</p>${x.sqft?`<div><span>Blended installed rate*</span><span>${cash(x.perSqft)} / sq ft</span></div>`:''}${x.selected.key!=='regular'?`<div><span>Below the regular full total</span><span>${cash(x.selected.savings)} (${num(x.selected.savingsPct)}% of that full total)</span></div>`:''}</div>`
-    :`<div class="doc-total"><div class="grand"><span>Total ${j.docType==='invoice'?'price':'estimate'}</span><span class="pending-total">Pending — starting price needed</span></div><div><span>Status</span><span>Incomplete / not finalized</span></div></div>`;
+    :blockedDoc
+      ?`<div class="doc-total"><div class="grand"><span>Total ${j.docType==='invoice'?'price':'estimate'}</span><span class="pending-total">Needs fixing</span></div><div><span>Status</span><span>Not issued</span></div></div>`
+      :`<div class="doc-total"><div class="grand"><span>Total ${j.docType==='invoice'?'price':'estimate'}</span><span class="pending-total">Pending — starting price needed</span></div><div><span>Status</span><span>Incomplete / not finalized</span></div></div>`;
   return `<article class="document">${j.isSample?'<div class="sample-banner"><b>ILLUSTRATIVE SAMPLE DATA</b></div>':''}
-  ${!x.quoteReady?`<div class="warn-banner"><b>Starting price needed</b> — this document is not a finalized customer quote. Required price-book inputs are unconfigured.</div>`:''}
+  ${blockedDoc?priceNeededBanner(x):(!x.quoteReady?`<div class="warn-banner"><b>Starting price needed</b> — this document is not a finalized customer quote. Required price-book inputs are unconfigured.</div>`:'')}
   <div class="doc-top"><div><div class="doc-brand">${escape(b.name)}</div><div class="doc-contact">${escape(b.address)}<br/>${escape(b.phone)}${b.email?'<br/>'+escape(b.email):''}</div></div><div class="doc-title"><h2>${j.docType==='invoice'?'Invoice':'Estimate'}${x.quoteReady?'':' (pending)'}</h2><p>${escape(j.number)}<br/>${escape(j.date)}</p></div></div>
   <div class="doc-client"><div><span class="doc-caption">Prepared for</span><b>${escape(j.customer||j.company||'Customer to be confirmed')}</b>${j.customer&&j.company?'<br/>'+escape(j.company):''}${j.email?'<br/>'+escape(j.email):''}${j.phone?'<br/>'+escape(j.phone):''}</div><div><span class="doc-caption">Project location</span>${escape(j.address||'Address to be confirmed')}<br/><b>${catalog?(j.projectType+' · '+(j.garagePackage||((j.catalogItems||[]).length+' item(s)'))):(num(x.sqft)+' sq ft total')}</b></div></div>
   ${catalog?catalogBreakdownDocHTML(x):(x.selected&&x.selected.breakdown?tableHTML(['Work / scope','Quantity','Rate','Amount'],[
@@ -1790,6 +1900,7 @@ function exportCosts(){
 }
 function printDocument(type){
   const j=activeJob(),x=calc();
+  if(type==='customer'&&(x.blockingIssues||[]).length){toast(x.blockingIssues[0].message);return}
   if(type!=='guide'&&!x.sqft){toast('Add square footage before printing.');return}
   if((type==='customer'||type==='guide')&&(!j.customer&&!j.company||!j.address)){toast('Add customer and address before printing.');return}
   if(type==='customer'&&x.total<=0){toast('Set a customer price before printing.');return}
@@ -1804,6 +1915,8 @@ function printDocument(type){
 }
 function exportHTML(type){
   const j=activeJob();
+  const priced=calc();
+  if((type==='customer')&&(priced.blockingIssues||[]).length){toast(priced.blockingIssues[0].message);return}
   let body;
   if(type==='customer'){body=customerDocument()+(j.includeGuideWithEstimate!==false?('<hr/>'+customerGuideDocument()):'');}
   else if(type==='guide'){body=customerGuideDocument();}
@@ -1972,13 +2085,22 @@ document.addEventListener('click',e=>{
     case'roleOwner':if(authMode())break;state.role='owner';render();toast('Owner preview — rates editable in this demo. Not secure auth.');break;
     case'roleWorker':if(authMode())break;state.role='worker';render();toast('Worker preview — rate book locked. Not secure auth.');break;
     case'helpBtn':$('helpDialog').showModal();break;
+    case'sanityContinue':{
+      if(!isOwner()){toast('Only the owner can confirm a price warning.');break;}
+      const job=activeJob();
+      const priced=E.calculate(job,state.settings);
+      if((priced.blockingIssues||[]).length){toast(priced.blockingIssues[0].message);break;}
+      job.sanityAck={role:'owner',fingerprint:warnFingerprint((priced.sanity&&priced.sanity.warnings)||[]),at:nowISO()};
+      save();render();toast('Confirmed. You can issue or share this quote.');break;}
+    case'ackPerSqft':if(!isOwner()){toast('Only the owner can confirm a rate.');break;}ackPerSqft();render();break;
+    case'saveAsIssued':save({issue:true});render();break;
     case'requestExtraDiscount':requestExtraDiscount();break;
     case'approveExtraDiscount':decideExtraDiscount('approve');break;
     case'rejectExtraDiscount':decideExtraDiscount('reject');break;
   }
   if(t.classList.contains('dialog-close'))$('helpDialog').close();
 });
-window.GuidedApp={get state(){return state},calc,ensureJob,guidedJob,nextJobNumber,guidedArea,computeAreaSqft,syncPrepIntoEngineFields,contactSufficient,backupObject,restoreObject,loadIllustrativeSample,STORAGE_KEY,STEPS,PREP_ITEMS,BASE_COLORS,FLAKE_BLENDS,E,save,render,activeJob,pushHistory,customerDocument,customerGuideDocument,customerVisibleLines,quoteAllocation,approvedAdjustmentCap,approvedAdjustmentLabel,clampJobDiscountToCap,jobSelectionFlags,moisturePriceEstimate,moistureSelectedAreas,subcontractorDocument,internalContent,equipmentPlan,calculateRoute,geocode,isOwner,go,goStep,APP_VERSION,resolveBaseColor,resolveFlakeBlend,applyColorFields,isCatalogJob,priceNeededBanner,catalogBreakdownDocHTML,requestExtraDiscount,decideExtraDiscount,
+window.GuidedApp={get state(){return state},calc,ensureJob,guidedJob,nextJobNumber,guidedArea,computeAreaSqft,syncPrepIntoEngineFields,contactSufficient,backupObject,restoreObject,loadIllustrativeSample,STORAGE_KEY,STEPS,PREP_ITEMS,BASE_COLORS,FLAKE_BLENDS,E,save,render,activeJob,pushHistory,customerDocument,customerGuideDocument,customerVisibleLines,quoteAllocation,approvedAdjustmentCap,approvedAdjustmentLabel,clampJobDiscountToCap,jobSelectionFlags,moisturePriceEstimate,moistureSelectedAreas,subcontractorDocument,internalContent,equipmentPlan,calculateRoute,geocode,isOwner,go,goStep,APP_VERSION,resolveBaseColor,resolveFlakeBlend,applyColorFields,isCatalogJob,priceNeededBanner,catalogBreakdownDocHTML,requestExtraDiscount,decideExtraDiscount,issueGate,perSqftAcked,ackPerSqft,
   calcLocal,updateLive,authMode,quoteKey,quoteInput,setServerQuote,serverQuotes,stripCosts,overlayServer,LEGACY_KEYS,toast,
   get runtime(){return runtime},boot};
 /** v7: the page decides the mode. demo -> local storage (NOT SECURE). auth -> rt.profile/settings/jobs from server. */

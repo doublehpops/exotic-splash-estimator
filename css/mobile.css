@@ -146,6 +146,11 @@
   .gate-form label{font-size:14px}
   .gate-steps{font-size:16px;color:#243832;line-height:1.45}
   .check-item [style*="font-size"],.moisture-panel [style*="font-size"],.finish-choice small{font-size:14px !important;color:#243832 !important}
+  .rate-override{margin-top:4px}
+  .rate-row{flex-direction:column;align-items:stretch}
+  .rate-row input{flex:0 0 auto;width:100%;height:48px;min-height:48px;max-height:48px;font-size:16px !important}
+  .rate-hint{font-size:16px;line-height:1.4;color:#243832}
+  .rate-error{font-size:16px;color:#7a2420}
 }
 
 @media(max-width:600px){
