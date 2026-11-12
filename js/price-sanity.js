@@ -96,6 +96,17 @@ function collectBook(settings){
     if(!hit)continue;
     (hit.level==='block'?blocks:warnings).push(hit);
   }
+  const multi=settings&&settings.extras&&settings.extras.multiColor;
+  const polyRates=[
+    [settings&&settings.catalog&&settings.catalog.garage&&settings.catalog.garage.topcoatAdj&&settings.catalog.garage.topcoatAdj.premium,'Polyaspartic topcoat / sq ft'],
+    [multi&&multi.metallicPerSqft,'Metallic 3–4 colors / sq ft'],
+    [multi&&multi.customFlakePerSqft,'Custom flake blend / sq ft']
+  ];
+  for(const [raw,label] of polyRates){
+    const hit=perSqftIssue(label,raw);
+    if(!hit)continue;
+    (hit.level==='block'?blocks:warnings).push(hit);
+  }
   const addOn=(settings&&settings.addOn)||{};
   for(const [key,label] of [['low','Standard add-in / sq ft'],['high','Higher add-in / sq ft']]){
     const hit=perSqftIssue(label,addOn[key]);
@@ -124,12 +135,6 @@ function guardSettings(settings){
     const hit=perSqftIssue(RATE_LABELS[key]||key,next.rates[key]);
     if(hit&&hit.level==='block')next.rates[key]=null;
   }
-  next.extras=next.extras||{};
-  for(const [key,label] of EXTRA_SQFT_KEYS){
-    if(!next.extras[key])continue;
-    const hit=perSqftIssue(label,next.extras[key].perSqft);
-    if(hit&&hit.level==='block'){next.extras[key].perSqft=0;next.extras[key].min=0;}
-  }
   next.addOn=next.addOn||{};
   for(const key of ['low','high']){
     const label=key==='low'?'Standard add-in / sq ft':'Higher add-in / sq ft';
@@ -151,7 +156,9 @@ function guardSettings(settings){
   const cost=costIssues(settings);
   for(const hit of cost.blocks.concat(cost.warnings))found.warnings.push(Object.assign({},hit,{level:'warn'}));
   for(const hit of productIssues(settings))found.warnings.push(hit);
-  return {settings:next,blocks:found.blocks,warnings:found.warnings};
+  const addonLine=/Coating removal|Paint removal|Adhesive|Poor slab|Anti-slip|Polyaspartic topcoat \/ sq ft|Metallic 3–4 colors|Custom flake blend|add-in \/ sq ft/;
+  const keep=hit=>!addonLine.test(String(hit&&hit.line||'')+' '+String(hit&&hit.message||''));
+  return {settings:next,blocks:found.blocks.filter(keep),warnings:found.warnings.filter(keep)};
 }
 function minimumJobIssue(raw){
   if(raw===null||raw===undefined||raw==='')return null;

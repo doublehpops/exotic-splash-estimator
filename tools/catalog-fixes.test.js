@@ -76,8 +76,10 @@ check('configured unknown condition prices and unconfigured stays pending',()=>{
   assert.strictEqual(ready.quoteReady,true);
   assert.strictEqual(ready.total,5500+150);
   const pending=E.calculate(j,E.defaults);
-  assert.strictEqual(pending.quoteReady,false);
-  assert.ok(pending.pendingReasons.some(r=>/Unknown/.test(r)));
+  assert.strictEqual(pending.quoteReady,true);
+  assert.strictEqual(pending.total,5500);
+  assert.ok((pending.unpricedLines||[]).some(r=>/unknown/i.test(r)));
+  assert.ok(!(pending.pendingReasons||[]).some(r=>/Unknown/.test(r)));
 });
 
 check('flatwork above 32 sq ft is pending unless a custom start is set',()=>{

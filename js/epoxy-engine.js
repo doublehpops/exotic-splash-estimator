@@ -70,6 +70,7 @@ const defaults={business:{name:'Exotic Splash Epoxy LLC',address:'211 W. Wacker 
   stemWall:{perLf:9},
   countertop:{solid:45,metallic:65,min:900},
   antiSlip:{perSqft:0.35},
+  multiColor:{metallicPerSqft:1.5,customFlakePerSqft:1},
   travelBeyond:{includedMiles:25,perMile:2.5},
   moving:{perHour:150},
   rush:{withinDays:7,pct:10},
@@ -88,7 +89,7 @@ const newJob=()=>({number:'ES-'+date().replaceAll('-','')+'-01',date:date(),cust
   /* v6 catalog */
   projectType:'floor', /* floor | garage | flatwork | seating */
   garagePackage:'measured', /* 1car | 2car | 3car | measured — >3-car MUST be measured */
-  garageStyle:'flake',garageTopcoat:'protective',garageCondition:'unknown',garagePrep:{cracks:false,crackLf:0,spalling:false,coatingRemoval:false,paintRemoval:false,patching:false,leveling:false,moisture:false},
+  garageStyle:'flake',garageTopcoat:'protective',garageMetallicColors:1,garageFlakeBlend:'stock',garageCondition:'unknown',garagePrep:{cracks:false,crackLf:0,spalling:false,coatingRemoval:false,paintRemoval:false,patching:false,leveling:false,moisture:false},
   extras:{crackLf:0,coatingRemoval:false,paintRemoval:false,adhesiveRemoval:false,poorSlab:false,stairsSolid:0,stairsFlake:0,stemWallLf:0,countertopSqft:0,countertopStyle:'solid',travel:false,movingHours:0,rush:false,weekend:false,winterHeatDays:0,consumables:false,fuel:false,extraVisits:0,warrantyYears:1},
   catalogItems:[],
   quoteFinalizeBlocked:false
@@ -179,7 +180,7 @@ function packageTablePrice(settings,job,pkgKey){
   const style=job&&job.garageStyle?job.garageStyle:'flake';
   const sys=tierTable[style];
   if(!sys||typeof sys!=='object')return null;
-  const aliases={oneCar:['oneCar','1car'],twoCar:['twoCar','2car'],threeCar:['threeCar','3car']};
+  const aliases={oneCar:['oneCar','1car','1'],twoCar:['twoCar','2car','2'],threeCar:['threeCar','3car','3']};
   const keys=aliases[pkgKey]||[pkgKey];
   for(const k of keys){
     if(Object.prototype.hasOwnProperty.call(sys,k)&&isConfigured(sys[k]))return Number(sys[k]);
@@ -219,15 +220,20 @@ function flatworkBandForSqft(cat,sqft){
   }
   return bands[bands.length-1]||null;
 }
-function resolveAdj(map,key,label,pending,lines,pkgKey){
+function priceNotSet(label){
+  return label+': price not set (owner: set it in Price book)';
+}
+/* Unpriced add-ons do not fail the quote. Pass unpriced to record them for the owner. */
+function resolveAdj(map,key,label,pending,lines,pkgKey,unpriced){
+  const missing=unpriced||pending;
   if(!map||!Object.prototype.hasOwnProperty.call(map,key)){
-    pending.push('Starting price needed — no approved adjustment configured for '+label+' ('+key+').');
-    return {ok:false,amount:0,configured:false};
+    missing.push(unpriced?priceNotSet(label):('Starting price needed — no approved adjustment configured for '+label+' ('+key+').'));
+    return {ok:!unpriced,amount:0,configured:false};
   }
   const read=readAdj(map[key],pkgKey||'');
   if(!read.configured){
-    pending.push('Starting price needed — '+label+' adjustment is unconfigured in the price book.');
-    return {ok:false,amount:0,configured:false};
+    missing.push(unpriced?priceNotSet(label):('Starting price needed — '+label+' adjustment is unconfigured in the price book.'));
+    return {ok:!unpriced,amount:0,configured:false};
   }
   const amount=read.amount;
   /* Flat dollar amount, which may be a credit. Never multiply a catalog adjustment by area sq ft. */
@@ -236,13 +242,84 @@ function resolveAdj(map,key,label,pending,lines,pkgKey){
   }
   return {ok:true,amount,configured:true};
 }
-function noteUnknown(map,key,pkgKey,pending,notes,unconfiguredText){
+function noteUnknown(map,key,pkgKey,pending,notes,unconfiguredText,unpriced){
   if(key!=='unknown')return;
-  if(!adjConfigured(map,'unknown',pkgKey))pending.push(unconfiguredText);
+  if(!adjConfigured(map,'unknown',pkgKey)){if(!unpriced)pending.push(unconfiguredText);}
   else notes.push('Condition not inspected — unknown-condition allowance applied.');
 }
+/* Best topcoat. The stored key stays premium. The rate is dollars per sq ft, or null until the owner sets it. */
+function addPolyLine(lines,unpriced,sqft,rawRate){
+  const sf=n(sqft);
+  if(!(sf>0))return;
+  if(!isConfigured(rawRate)){
+    unpriced.push(priceNotSet('Polyaspartic topcoat'));
+    return;
+  }
+  const rate=Number(rawRate);
+  if(rate>40){
+    unpriced.push('Polyaspartic topcoat: price is outside $0–$40 (owner: set it in Price book)');
+    return;
+  }
+  const total=r2(sf*rate);
+  if(!(total>0))return;
+  lines.push({kind:'extra',label:'Polyaspartic topcoat',description:'$'+rate.toFixed(2)+' / sq ft',qty:sf,unit:'sq ft',rate,total});
+}
+function topcoatAdjLabel(key){
+  return key==='premium'?'Polyaspartic topcoat':'Topcoat ('+(key||'protective')+')';
+}
+/* 1–4 only. Five or more is capped at 4. Blank counts as one included color. */
+function colorCount(v){
+  const x=Math.round(Number(v));
+  if(!Number.isFinite(x)||x<=1)return 1;
+  return x>4?4:x;
+}
+function pushRateLine(rows,unpriced,label,sqft,rawRate){
+  const sf=n(sqft);
+  if(!(sf>0))return;
+  if(!isConfigured(rawRate)){
+    unpriced.push(priceNotSet(label));
+    return;
+  }
+  const rate=Number(rawRate);
+  if(rate>40){
+    unpriced.push(label+': price is outside $0–$40 (owner: set it in Price book)');
+    return;
+  }
+  if(!(rate>0))return;
+  const total=r2(sf*rate);
+  if(!(total>0))return;
+  rows.push({kind:'extra',label,description:'$'+rate.toFixed(2)+' / sq ft',qty:sf,unit:'sq ft',rate,total});
+}
+/* Metallic 3–4 colors and a custom flake blend add on top. Solid has no multi-color charge. */
+function collectColorCharges(job,settings,rows,unpriced){
+  const cfg=extrasConfig(settings).multiColor||{};
+  let metalSf=0,flakeSf=0;
+  const type=projectTypeOf(job);
+  if(type==='garage'&&!garageUsesMeasured(job)){
+    const sf=packageBillableSqft(job,settings);
+    if((job.garageStyle||'')==='metallic'&&colorCount(job.garageMetallicColors)>=3)metalSf+=sf;
+    if((job.garageStyle||'')==='flake'&&job.garageFlakeBlend==='custom')flakeSf+=sf;
+  }else if(type==='floor'||(type==='garage'&&garageUsesMeasured(job))){
+    for(const a of job.areas||[]){
+      const sf=n(a.sqft);
+      if(!(sf>0)||a.style==='level')continue;
+      if(a.style==='metallic'&&colorCount(a.metallicColors)>=3)metalSf+=sf;
+      if(a.style==='flake'&&a.flakeBlend==='custom')flakeSf+=sf;
+    }
+  }else if(type==='flatwork'){
+    for(const it of job.catalogItems||[]){
+      let sf=n(it.sqft);
+      if(!(sf>0))sf=r2(n(it.length)*n(it.width));
+      if(!(sf>0))continue;
+      if(it.style==='metallic'&&colorCount(it.metallicColors)>=3)metalSf+=sf;
+      if(it.style==='flake'&&it.flakeBlend==='custom')flakeSf+=sf;
+    }
+  }
+  if(metalSf>0)pushRateLine(rows,unpriced,'Metallic extra colors',metalSf,cfg.metallicPerSqft);
+  if(flakeSf>0)pushRateLine(rows,unpriced,'Custom flake blend',flakeSf,cfg.customFlakePerSqft);
+}
 function blankExtras(){
-  return {crackLf:0,coatingRemoval:false,paintRemoval:false,adhesiveRemoval:false,poorSlab:false,stairsSolid:0,stairsFlake:0,stemWallLf:0,countertopSqft:0,countertopStyle:'solid',travel:false,movingHours:0,rush:false,weekend:false,winterHeatDays:0,consumables:false,fuel:false,extraVisits:0,warrantyYears:1};
+  return {crackLf:0,coatingRemoval:false,paintRemoval:false,adhesiveRemoval:false,poorSlab:false,stairsSolid:0,stairsFlake:0,stemWallLf:0,countertopSqft:0,countertopStyle:'solid',antiSlip:false,travel:false,movingHours:0,rush:false,weekend:false,winterHeatDays:0,consumables:false,fuel:false,extraVisits:0,warrantyYears:1};
 }
 function cfgNum(v,fallback){
   if(v===null||v===undefined||v==='')return fallback;
@@ -264,6 +341,29 @@ function smallSolidSpec(settings){
   const raw=settings&&settings.rates&&settings.rates.smallSolidFloor;
   const src=raw&&typeof raw==='object'&&!Array.isArray(raw)?raw:{};
   return {maxSqft:cfgNum(src.maxSqft,d.maxSqft),min:cfgNum(src.min,d.min)};
+}
+/* Copy 1/2/3 size aliases onto oneCar/twoCar/threeCar when the canonical key is blank. */
+function normalizeStaffPackages(raw){
+  const packs=raw&&raw.garage&&raw.garage.packages;
+  if(!packs||typeof packs!=='object')return raw;
+  const alias={oneCar:['1car','1'],twoCar:['2car','2'],threeCar:['3car','3']};
+  for(const tier of Object.keys(packs)){
+    const systems=packs[tier];
+    if(!systems||typeof systems!=='object'||Array.isArray(systems))continue;
+    for(const sys of Object.keys(systems)){
+      const sizes=systems[sys];
+      if(!sizes||typeof sizes!=='object'||Array.isArray(sizes))continue;
+      for(const canon of Object.keys(alias)){
+        if(isConfigured(sizes[canon]))continue;
+        for(const key of alias[canon]){
+          if(!isConfigured(sizes[key]))continue;
+          sizes[canon]=Number(sizes[key]);
+          break;
+        }
+      }
+    }
+  }
+  return raw;
 }
 function packageTypicalSqft(job,settings){
   const key=garagePkgKey(job);
@@ -305,24 +405,53 @@ function solidSystemSqft(job,settings){
   }
   return 0;
 }
-function smallSolidFloorAmount(settings,job){
+/* Under the ceiling, the flat small-solid minimum. The per-sqft price wins when it is higher. A stored mid-size band is not a package price. */
+function smallSolidFloorAmount(settings,job,tier){
   if(job&&job.method&&job.method!=='rates')return 0;
   const spec=smallSolidSpec(settings);
-  if(!(spec.maxSqft>0)||!(spec.min>0))return 0;
   const sf=solidSystemSqft(job,settings);
-  if(sf>0&&sf<spec.maxSqft)return spec.min;
+  if(!(sf>0))return 0;
+  if(spec.maxSqft>0&&spec.min>0&&sf<spec.maxSqft)return spec.min;
   return 0;
 }
-function bindingMinimum(settings,job,pre,active){
+function bindingMinimum(settings,job,pre,active,tier){
   if(!active)return {minimum:0,label:''};
   const jobMin=minimumJobAmount(settings);
-  const solidMin=smallSolidFloorAmount(settings,job);
+  const solidMin=smallSolidFloorAmount(settings,job,tier);
   const target=Math.max(jobMin,solidMin);
   const minimum=Math.max(0,target-pre);
   let label='';
   if(minimum>0.001&&solidMin>=jobMin&&solidMin>pre)label='Small solid floor minimum';
   else if(minimum>0.001)label='Minimum job charge';
   return {minimum:r2(minimum),label};
+}
+/* Package installs are costed as a floor of the same system. Sq ft is the package size, plus overflow above it. */
+function packageBillableSqft(job,settings){
+  const typical=packageTypicalSqft(job,settings);
+  const measured=sumAreaSqft(job);
+  if(!(typical>0))return measured;
+  return Math.max(typical,measured);
+}
+function floorSystemCost(settings,job,sqft,style){
+  const shadow=newJob();
+  shadow.customer=job.customer||'Package';
+  shadow.company=job.company||'';
+  shadow.projectType='floor';
+  shadow.method='rates';
+  shadow.priceOption='regular';
+  shadow.tax=0;
+  shadow.discount=0;
+  shadow.miles=n(job.miles);
+  shadow.minutes=n(job.minutes);
+  shadow.visits=job.visits;
+  shadow.vehicles=job.vehicles;
+  shadow.crew=job.crew;
+  shadow.rentalDays=job.rentalDays;
+  shadow.condition='sound';
+  shadow.patchKits=0;
+  shadow.extras=blankExtras();
+  shadow.areas=[{...newArea(),name:'Package area',sqft:sqft,style:style,coats:1,flake:'light',grip:false,level:false,moisture:false,rate:null}];
+  return calculate(shadow,settings);
 }
 function sqftCharge(cfg,sqft){
   const sf=n(sqft);
@@ -373,8 +502,25 @@ function usesScheduledRemoval(job){
   }
   return false;
 }
-function pushSqftExtra(rows,cfg,sqft,label,minNote){
-  const hit=sqftCharge(cfg,sqft);
+function extraPriceReady(cfg){
+  if(!cfg)return false;
+  const rate=Number(cfg.perSqft);
+  const minCharge=Number(cfg.min);
+  return (Number.isFinite(rate)&&rate>0)||(Number.isFinite(minCharge)&&minCharge>0);
+}
+function pushSqftExtra(rows,cfg,sqft,label,minNote,unpriced){
+  const sf=n(sqft);
+  if(!(sf>0))return;
+  const rawRate=cfg&&cfg.perSqft;
+  if(isConfigured(rawRate)&&Number(rawRate)>40){
+    if(unpriced)unpriced.push(label+': price is outside $0–$40 (owner: set it in Price book)');
+    return;
+  }
+  if(!extraPriceReady(cfg)){
+    if(unpriced)unpriced.push(priceNotSet(label));
+    return;
+  }
+  const hit=sqftCharge(cfg,sf);
   if(!hit)return;
   rows.push({kind:'extra',label,description:hit.minApplied?('$'+(n(cfg.perSqft)).toFixed(2)+'/sq ft, '+minNote+' minimum'):'$'+(n(cfg.perSqft)).toFixed(2)+' / sq ft',qty:hit.qty,unit:'sq ft',rate:hit.rate,total:hit.total});
 }
@@ -383,7 +529,11 @@ function collectOptionalExtras(job,settings){
   const cfg=extrasConfig(settings);
   const ex=job.extras||{};
   const rows=[];
+  const unpriced=[];
+  rows.unpriced=unpriced;
   if(crackRepairSelected(job)){
+    if(!isConfigured(cfg.crackRepair.flat)&&!isConfigured(cfg.crackRepair.perLf))unpriced.push(priceNotSet('Crack repair'));
+    else {
     const feet=crackRepairFeet(job);
     const included=n(cfg.crackRepair.includedLf)||10;
     const flat=n(cfg.crackRepair.flat);
@@ -391,34 +541,50 @@ function collectOptionalExtras(job,settings){
     const over=Math.max(0,feet-included);
     const total=r2(flat+over*per);
     if(total>0)rows.push({kind:'extra',label:'Crack repair',description:feet<=included?'Flat rate up to '+included+' linear ft':included+' linear ft included, then $'+per.toFixed(2)+'/ft',qty:feet>0?feet:included,unit:'lf',rate:feet<=included?flat:per,total});
+    }
   }
-  pushSqftExtra(rows,cfg.coatingRemoval,prepChargeSqft(job,settings,'coatingRemoval','coatingRemoval'),'Coating removal','$'+n(cfg.coatingRemoval.min).toFixed(0));
+  pushSqftExtra(rows,cfg.coatingRemoval,prepChargeSqft(job,settings,'coatingRemoval','coatingRemoval'),'Coating removal','$'+n(cfg.coatingRemoval.min).toFixed(0),unpriced);
   let paintSf=prepChargeSqft(job,settings,'paintRemoval','paintRemoval');
   if(!(paintSf>0)&&job.garageCondition==='paint')paintSf=actualJobSqft(job,settings);
-  pushSqftExtra(rows,cfg.paintRemoval,paintSf,'Paint removal','$'+n(cfg.paintRemoval.min).toFixed(0));
+  pushSqftExtra(rows,cfg.paintRemoval,paintSf,'Paint removal','$'+n(cfg.paintRemoval.min).toFixed(0),unpriced);
   let adhSf=sumAreaSqft(job,a=>a.prep&&a.prep.adhesive);
   if(!(adhSf>0)&&n(ex.adhesiveRemovalSqft)>0)adhSf=n(ex.adhesiveRemovalSqft);
   if(!(adhSf>0)&&job.garagePrep&&job.garagePrep.adhesive)adhSf=actualJobSqft(job,settings);
   if(!(adhSf>0)&&ex.adhesiveRemoval===true)adhSf=actualJobSqft(job,settings);
   if(!(adhSf>0)&&job.garageCondition==='adhesive')adhSf=actualJobSqft(job,settings);
-  pushSqftExtra(rows,cfg.adhesiveRemoval,adhSf,'Adhesive / mastic removal','$'+n(cfg.adhesiveRemoval.min).toFixed(0));
+  pushSqftExtra(rows,cfg.adhesiveRemoval,adhSf,'Adhesive / mastic removal','$'+n(cfg.adhesiveRemoval.min).toFixed(0),unpriced);
   let poorSf=prepChargeSqft(job,settings,'spalling','spalling');
   if(!(poorSf>0)&&n(ex.poorSlabSqft)>0)poorSf=n(ex.poorSlabSqft);
   if(!(poorSf>0)&&ex.poorSlab===true)poorSf=actualJobSqft(job,settings);
-  pushSqftExtra(rows,cfg.poorSlab,poorSf,'Poor slab','$'+n(cfg.poorSlab.min).toFixed(0));
+  pushSqftExtra(rows,cfg.poorSlab,poorSf,'Poor slab','$'+n(cfg.poorSlab.min).toFixed(0),unpriced);
   let gripSf=sumAreaSqft(job,a=>a.grip&&a.style!=='level');
   if(!(gripSf>0)&&n(ex.antiSlipSqft)>0)gripSf=n(ex.antiSlipSqft);
-  if(!(gripSf>0)&&ex.antiSlip===true)gripSf=actualJobSqft(job,settings);
-  pushSqftExtra(rows,cfg.antiSlip,gripSf,'Anti-slip additive','$'+n(cfg.antiSlip.min||0).toFixed(0));
-  if(n(ex.stairsSolid)>0)rows.push({kind:'extra',label:'Stairs (solid)',description:'$' + n(cfg.stairs.solid).toFixed(2)+' per step',qty:n(ex.stairsSolid),unit:'step',rate:n(cfg.stairs.solid),total:r2(n(ex.stairsSolid)*n(cfg.stairs.solid))});
-  if(n(ex.stairsFlake)>0)rows.push({kind:'extra',label:'Stairs (flake)',description:'$' + n(cfg.stairs.flake).toFixed(2)+' per step',qty:n(ex.stairsFlake),unit:'step',rate:n(cfg.stairs.flake),total:r2(n(ex.stairsFlake)*n(cfg.stairs.flake))});
-  if(n(ex.stemWallLf)>0)rows.push({kind:'extra',label:'Stem walls / cove',description:'$' + n(cfg.stemWall.perLf).toFixed(2)+' per linear ft',qty:n(ex.stemWallLf),unit:'lf',rate:n(cfg.stemWall.perLf),total:r2(n(ex.stemWallLf)*n(cfg.stemWall.perLf))});
+  if(!(gripSf>0)&&ex.antiSlip===true){
+    gripSf=(projectTypeOf(job)==='garage'&&!garageUsesMeasured(job))?packageBillableSqft(job,settings):actualJobSqft(job,settings);
+  }
+  pushSqftExtra(rows,cfg.antiSlip,gripSf,'Anti-slip additive','$'+n(cfg.antiSlip.min||0).toFixed(0),unpriced);
+  if(n(ex.stairsSolid)>0){
+    if(!isConfigured(cfg.stairs.solid))unpriced.push(priceNotSet('Stairs (solid)'));
+    else rows.push({kind:'extra',label:'Stairs (solid)',description:'$' + n(cfg.stairs.solid).toFixed(2)+' per step',qty:n(ex.stairsSolid),unit:'step',rate:n(cfg.stairs.solid),total:r2(n(ex.stairsSolid)*n(cfg.stairs.solid))});
+  }
+  if(n(ex.stairsFlake)>0){
+    if(!isConfigured(cfg.stairs.flake))unpriced.push(priceNotSet('Stairs (flake)'));
+    else rows.push({kind:'extra',label:'Stairs (flake)',description:'$' + n(cfg.stairs.flake).toFixed(2)+' per step',qty:n(ex.stairsFlake),unit:'step',rate:n(cfg.stairs.flake),total:r2(n(ex.stairsFlake)*n(cfg.stairs.flake))});
+  }
+  if(n(ex.stemWallLf)>0){
+    if(!isConfigured(cfg.stemWall.perLf))unpriced.push(priceNotSet('Stem walls / cove'));
+    else rows.push({kind:'extra',label:'Stem walls / cove',description:'$' + n(cfg.stemWall.perLf).toFixed(2)+' per linear ft',qty:n(ex.stemWallLf),unit:'lf',rate:n(cfg.stemWall.perLf),total:r2(n(ex.stemWallLf)*n(cfg.stemWall.perLf))});
+  }
   if(n(ex.countertopSqft)>0){
     const sf=n(ex.countertopSqft);
     const metallic=ex.countertopStyle==='metallic';
-    const rate=n(metallic?cfg.countertop.metallic:cfg.countertop.solid);
-    const total=r2(Math.max(sf*rate,n(cfg.countertop.min)));
-    rows.push({kind:'extra',label:metallic?'Countertop / bar top (metallic)':'Countertop / bar top (solid)',description:'$' + rate.toFixed(2)+'/sq ft, $'+n(cfg.countertop.min).toFixed(0)+' minimum',qty:sf,unit:'sq ft',rate,total});
+    const raw=metallic?cfg.countertop.metallic:cfg.countertop.solid;
+    if(!isConfigured(raw)&&!isConfigured(cfg.countertop.min))unpriced.push(priceNotSet(metallic?'Countertop / bar top (metallic)':'Countertop / bar top (solid)'));
+    else {
+      const rate=n(raw);
+      const total=r2(Math.max(sf*rate,n(cfg.countertop.min)));
+      if(total>0)rows.push({kind:'extra',label:metallic?'Countertop / bar top (metallic)':'Countertop / bar top (solid)',description:'$' + rate.toFixed(2)+'/sq ft, $'+n(cfg.countertop.min).toFixed(0)+' minimum',qty:sf,unit:'sq ft',rate,total});
+    }
   }
   if(ex.travel){
     const beyond=Math.max(0,n(job.miles)-n(cfg.travelBeyond.includedMiles));
@@ -437,7 +603,10 @@ function collectOptionalExtras(job,settings){
     if(total>0)rows.push({kind:'extra',label:'Fuel and vehicle wear',description:'$' + rate.toFixed(2)+' per mile',qty:miles,unit:'mile',rate,total});
   }
   if(n(ex.extraVisits)>0)rows.push({kind:'extra',label:'Extra site visit',description:'$' + n(cfg.extraVisit.flat).toFixed(2)+' each',qty:n(ex.extraVisits),unit:'visit',rate:n(cfg.extraVisit.flat),total:r2(n(ex.extraVisits)*n(cfg.extraVisit.flat))});
-  return rows.filter(row=>n(row.total)>0);
+  collectColorCharges(job,settings,rows,unpriced);
+  const kept=rows.filter(row=>n(row.total)>0);
+  kept.unpriced=unpriced;
+  return kept;
 }
 /* Rush, weekend, and the 3-year warranty are each a percent of the same job price. They add. They do not multiply, and they do not change the other tier. */
 function percentExtraLines(job,settings,base){
@@ -464,7 +633,7 @@ function buildCatalogBreakdown(job,settings){
   cat.flatwork=Object.assign({},catalogDefaults.flatwork,(settings.catalog&&settings.catalog.flatwork)||{});
   cat.seating=Object.assign({},catalogDefaults.seating,(settings.catalog&&settings.catalog.seating)||{});
   const type=projectTypeOf(job);
-  const pending=[],notes=[],lines=[],adjustments=[];
+  const pending=[],notes=[],lines=[],adjustments=[],unpriced=[];
   const pkgKey=garagePkgKey(job);
   let startingTotal=0, startingConfigured=true, itemCount=0, measureSqft=0;
   let startingLabel='Starting price';
@@ -513,35 +682,37 @@ function buildCatalogBreakdown(job,settings){
     }
     const style=styleName;
     if(style==='sealer'){
-      pending.push('Clear seal is not a supported garage-package preset. A flat sealer adjustment can wipe the package start. Use measured square feet at the sealer selling rate instead. This quote stays blocked.');
+      unpriced.push(priceNotSet('Clear seal'));
     } else if(style==='custom'){
-      pending.push('Custom garage scope is unresolved. Inspection and an owner override are required. No average was applied.');
+      unpriced.push(priceNotSet('Custom scope'));
     }
     if((job.garageCondition||'')==='critical'){
-      pending.push('Critical slab condition is unresolved. Inspection and an owner override are required. No average was applied.');
+      unpriced.push(priceNotSet('Critical slab'));
     }
     const prepOn=job.garagePrep||{};
     if(prepOn.leveling){
-      pending.push('Leveling on a garage package is measured by area and depth only. No flat package leveling amount is applied.');
+      unpriced.push(priceNotSet('Leveling'));
     }
-    /* The package table is the full system price. Skip the solid credit, and do not leave metallic pending when its cell is filled. Sealer and custom stay blocked and their flat amounts are not applied. */
+    /* The package table is the full system price. Skip the solid credit. Unpriced add-ons stay off the customer total. */
     const skipSolidCredit=usedTable&&style==='solid';
     const metallicCovered=usedTable&&style==='metallic'&&!adjConfigured(cat.garage.materialAdj,'metallic',pkgKey);
     if(style!=='sealer'&&style!=='custom'&&!skipSolidCredit&&!metallicCovered){
-      resolveAdj(cat.garage.materialAdj,style,'Material / system ('+style+')',pending,adjustments,pkgKey);
+      resolveAdj(cat.garage.materialAdj,style,'Material / system ('+style+')',pending,adjustments,pkgKey,unpriced);
     }
-    const top=resolveAdj(cat.garage.topcoatAdj,job.garageTopcoat||'protective','Topcoat ('+(job.garageTopcoat||'protective')+')',pending,adjustments,pkgKey);
+    const topKey=job.garageTopcoat||'protective';
+    if(topKey==='premium')addPolyLine(adjustments,unpriced,typical,cat.garage.topcoatAdj&&cat.garage.topcoatAdj.premium);
+    else resolveAdj(cat.garage.topcoatAdj,topKey,topcoatAdjLabel(topKey),pending,adjustments,pkgKey,unpriced);
     const condKey=job.garageCondition||'unknown';
-    /* Paint and adhesive are optional per-sqft extras. Critical stays blocked and its flat amount is not applied. */
+    /* Paint and adhesive are optional per-sqft extras. A critical slab note does not remove the base price. */
     if(condKey!=='paint'&&condKey!=='adhesive'&&condKey!=='critical'){
-      noteUnknown(cat.garage.conditionAdj,condKey,pkgKey,pending,notes,'Condition is Unknown / not inspected — do not assume $0. Inspect or set an explicit unknown-condition adjustment in the price book.');
-      resolveAdj(cat.garage.conditionAdj,condKey,'Concrete condition ('+condKey+')',pending,adjustments,pkgKey);
+      noteUnknown(cat.garage.conditionAdj,condKey,pkgKey,pending,notes,'Condition is Unknown / not inspected — do not assume $0. Inspect or set an explicit unknown-condition adjustment in the price book.',unpriced);
+      resolveAdj(cat.garage.conditionAdj,condKey,'Concrete condition ('+condKey+')',pending,adjustments,pkgKey,unpriced);
     }
     const prep=job.garagePrep||{};
     const scheduledPrep={cracks:1,spalling:1,coatingRemoval:1,paintRemoval:1};
     for(const [pk,on] of Object.entries(prep)){
       if(!on||pk==='leveling'||scheduledPrep[pk])continue;
-      resolveAdj(cat.garage.prepAdj,pk,'Prep: '+pk,pending,adjustments,pkgKey);
+      resolveAdj(cat.garage.prepAdj,pk,'Prep: '+pk,pending,adjustments,pkgKey,unpriced);
     }
     itemCount=1;
     startingLabel=pkgLabel+' starting';
@@ -578,13 +749,13 @@ function buildCatalogBreakdown(job,settings){
         startingTotal+=start;
         lines.push({kind:'starting',label:name+' — starting price',description:(band?band.label+' · ':'')+(sf?sf+' sq ft':'size noted')+(L&&W?' · '+L+'×'+W+' ft':''),qty:1,unit:'item',rate:start,total:start});
       }
-      resolveAdj(cat.flatwork.materialAdj,it.style||'solid','Material / system ('+(it.style||'solid')+') — '+name,pending,adjustments);
-      resolveAdj(cat.flatwork.topcoatAdj,it.topcoat||'protective','Topcoat ('+(it.topcoat||'protective')+') — '+name,pending,adjustments);
+      resolveAdj(cat.flatwork.materialAdj,it.style||'solid','Material / system ('+(it.style||'solid')+') — '+name,pending,adjustments,'',unpriced);
+      resolveAdj(cat.flatwork.topcoatAdj,it.topcoat||'protective',(it.topcoat==='premium'?'Polyaspartic topcoat — '+name:topcoatAdjLabel(it.topcoat||'protective')+' — '+name),pending,adjustments,'',unpriced);
       const ck=it.condition||'unknown';
-      noteUnknown(cat.flatwork.conditionAdj,ck,'',pending,notes,'Condition is Unknown for '+name+' — do not assume $0. Inspect or configure an explicit adjustment.');
-      if(ck==='critical')pending.push('Critical condition for '+name+' is unresolved. Inspection and an owner override are required.');
-      if((it.style||'')==='custom')pending.push('Custom material for '+name+' is unresolved. Inspection and an owner override are required.');
-      resolveAdj(cat.flatwork.conditionAdj,ck,'Condition ('+ck+') — '+name,pending,adjustments);
+      noteUnknown(cat.flatwork.conditionAdj,ck,'',pending,notes,'Condition is Unknown for '+name+' — do not assume $0. Inspect or configure an explicit adjustment.',unpriced);
+      if(ck==='critical')unpriced.push(priceNotSet('Critical condition — '+name));
+      if((it.style||'')==='custom')unpriced.push(priceNotSet('Custom material — '+name));
+      if(ck!=='critical')resolveAdj(cat.flatwork.conditionAdj,ck,'Condition ('+ck+') — '+name,pending,adjustments,'',unpriced);
     }
     startingLabel='Flatwork starting';
   } else if(type==='seating'){
@@ -606,13 +777,16 @@ function buildCatalogBreakdown(job,settings){
         startingTotal+=total;
         lines.push({kind:'starting',label:name+' — starting price',description:seatType+' · '+qty+' × $'+unit.toFixed(2),qty:qty,unit:'item',rate:unit,total:total});
       }
-      resolveAdj(cat.seating.materialAdj,it.style||'solid','Material / system ('+(it.style||'solid')+') — '+name,pending,adjustments);
-      resolveAdj(cat.seating.topcoatAdj,it.topcoat||'protective','Topcoat ('+(it.topcoat||'protective')+') — '+name,pending,adjustments);
+      resolveAdj(cat.seating.materialAdj,it.style||'solid','Material / system ('+(it.style||'solid')+') — '+name,pending,adjustments,'',unpriced);
+      if((it.topcoat||'protective')==='premium'){
+        if(!isConfigured(cat.seating.topcoatAdj&&cat.seating.topcoatAdj.premium))unpriced.push(priceNotSet('Polyaspartic topcoat — '+name));
+        else resolveAdj(cat.seating.topcoatAdj,'premium','Polyaspartic topcoat — '+name,pending,adjustments,'',unpriced);
+      } else resolveAdj(cat.seating.topcoatAdj,it.topcoat||'protective',topcoatAdjLabel(it.topcoat||'protective')+' — '+name,pending,adjustments,'',unpriced);
       const ck=it.condition||'unknown';
-      noteUnknown(cat.seating.conditionAdj,ck,'',pending,notes,'Condition is Unknown for '+name+' — do not assume $0. Inspect or configure an explicit adjustment.');
-      if(ck==='critical')pending.push('Critical condition for '+name+' is unresolved. Inspection and an owner override are required.');
-      if((it.style||'')==='custom')pending.push('Custom material for '+name+' is unresolved. Inspection and an owner override are required.');
-      resolveAdj(cat.seating.conditionAdj,ck,'Condition ('+ck+') — '+name,pending,adjustments);
+      noteUnknown(cat.seating.conditionAdj,ck,'',pending,notes,'Condition is Unknown for '+name+' — do not assume $0. Inspect or configure an explicit adjustment.',unpriced);
+      if(ck==='critical')unpriced.push(priceNotSet('Critical condition — '+name));
+      if((it.style||'')==='custom')unpriced.push(priceNotSet('Custom material — '+name));
+      if(ck!=='critical')resolveAdj(cat.seating.conditionAdj,ck,'Condition ('+ck+') — '+name,pending,adjustments,'',unpriced);
     }
     startingLabel='Seating starting';
   }
@@ -627,7 +801,7 @@ function buildCatalogBreakdown(job,settings){
   return {
     type, pending, notes, lines:allLines, startingLines:lines, adjustments, startingTotal, adjTotal, scopeTotal,
     startingConfigured, quoteReady, itemCount, measureSqft, startingLabel,
-    pendingUnique:[...new Set(pending)], notesUnique:[...new Set(notes)]
+    pendingUnique:[...new Set(pending)], notesUnique:[...new Set(notes)], unpriced:[...new Set(unpriced)]
   };
 }
 
@@ -702,29 +876,31 @@ function calculateCatalog(job,settings){
   const br=buildCatalogBreakdown(job,settings);
   const warnings=[...br.pendingUnique,...(br.notesUnique||[])];
   if(!job.customer&&!job.company)warnings.push('Add a customer name before issuing the document.');
-  /* Travel/equipment still fold into overhead once when quote can price; do not invent scope $ */
+  /* Selling travel stays in the quote total. Garage package owner cost is applied after the selling price is set. */
   const hasScope=br.scopeTotal>0||br.quoteReady;
-  const travelCost=hasScope?(tr.mileage+tr.crewTravel):0;
-  const equipment=equipmentLines(job,c,hasScope);
-  const equip=equipment.reduce((s,x)=>s+x.total,0);
-  const overheadBase=hasScope?flatOverhead(c):0;
-  const overhead=overheadBase+travelCost+equip;
-  const overheadItems=hasScope?[
+  const sellingTravel=hasScope?(tr.mileage+tr.crewTravel):0;
+  let equipment=equipmentLines(job,c,hasScope);
+  let equip=equipment.reduce((s,x)=>s+x.total,0);
+  let overheadBase=hasScope?flatOverhead(c):0;
+  let travelCost=sellingTravel;
+  let overhead=overheadBase+travelCost+equip;
+  let overheadItems=hasScope?[
     {label:'Business overhead / job',qty:1,unit:'allowance',unitPrice:overheadBase,total:overheadBase},
     ...(tr.mileage?[{label:'Vehicle mileage (in overhead)',qty:tr.vehicleMiles,unit:'mile',unitPrice:tr.rate,total:tr.mileage}]:[]),
     ...(tr.crewTravel?[{label:'Crew travel time (in overhead)',qty:tr.crewHours,unit:'person-hr',unitPrice:n(c.labor),total:tr.crewTravel}]:[]),
     {label:'Equipment & job supplies (in overhead)',qty:1,unit:'allowance',unitPrice:equip,total:equip}
   ]:[];
-  /* Catalog jobs: no invented material/labor BOM — keep planning hours empty unless measured */
-  const material=[],mat=0,tax=0,hours=[],labor=0;
-  const direct=mat+tax+labor;
-  const contingency=(direct+overhead)*n(c.contingency)/100,cost=direct+overhead+contingency;
+  /* Flatwork and seating keep an empty material/labor bill. Garage packages are costed like a floor below. */
+  let material=[],mat=0,tax=0,hours=[],labor=0,personHours=0,costSqft=0;
+  let direct=mat+tax+labor;
+  let contingency=(direct+overhead)*n(c.contingency)/100,cost=direct+overhead+contingency;
 
   const optional=collectOptionalExtras(job,settings);
+  const unpriced=[...(br.unpriced||[]),...(optional.unpriced||[])];
   const lines=[...br.lines,...optional];
   /* Property add-in is per-sq-ft floor economics — do not auto-apply to unmeasured catalog packages */
   const addOn={label:(settings.addOn||{}).label||'Standard property / trip add-in',tier:'low',rate:0,included:false,total:0};
-  const travelInQuote=travelCost;
+  const travelInQuote=sellingTravel;
   const lineSum=lines.reduce((s,x)=>s+sn(x.total),0);
   const discountable=br.startingTotal; /* adjustments stay; discount applies to starting scope similar to finish */
   const regularBase=lineSum+travelInQuote;
@@ -755,13 +931,33 @@ function calculateCatalog(job,settings){
     sel.paymentsReconcile=!sel.payments.length||Math.abs(r2(sel.payments.reduce((s,p)=>s+n(p.amount),0))-total)<0.02;
     choices[job.priceOption]=sel;
   }
+  if(br.type==='garage'){
+    const style=['solid','flake','metallic','sealer'].includes(job.garageStyle)?job.garageStyle:'';
+    const sf=packageBillableSqft(job,settings);
+    if(style&&sf>0){
+      const floor=floorSystemCost(settings,job,sf,style);
+      if(floor&&Number.isFinite(floor.cost)){
+        material=floor.material;mat=floor.mat;tax=floor.tax;hours=floor.hours;labor=floor.labor;
+        personHours=floor.personHours;equipment=floor.equipment;equip=floor.equip;
+        direct=floor.direct;overhead=floor.overhead;overheadBase=floor.overheadBase;
+        overheadItems=floor.overheadItems;contingency=floor.contingency;cost=floor.cost;
+        travelCost=floor.travelCost;costSqft=sf;
+      }
+    }
+  }
+  const materialCost=mat+tax;
+  const grossProfit=subtotal-labor-materialCost,grossMargin=subtotal?grossProfit/subtotal*100:0;
+  const operatingProfit=grossProfit-overheadBase,operatingMargin=subtotal?operatingProfit/subtotal*100:0;
   const profit=subtotal-cost,margin=subtotal?profit/subtotal*100:0;
+  if(costSqft&&subtotal>0&&(labor+materialCost)>0&&grossMargin<40)warnings.push('Gross margin is '+grossMargin.toFixed(1)+'%, under the 40% gross target. Review the job cost before selling this tier.');
+  if(costSqft&&subtotal>0&&(labor+materialCost)>0&&operatingMargin<15)warnings.push('Net margin is '+operatingMargin.toFixed(1)+'%, under the 15% net target after overhead. Review the job cost.');
+  for(const msg of unpriced)warnings.push(msg);
   const sqft=br.measureSqft||0;
   const result={
     sqft,finished:sqft,levelArea:0,levelEquiv:0,material,mat,tax,hours,labor,equipment,equip,direct,overhead,overheadBase,overheadItems,contingency,cost,
     lines:displayLines,base:regularBase,regularBase,discountable,discountSqft:0,choices,selected:sel,addOn,travel:tr,travelCost,travelInQuote,crew:tr.crew,
-    discount:sel.discount,minimum,minimumLabel:bind.label,subtotal,salesTax,total,profit,margin,perSqft:sqft&&br.quoteReady?total/sqft:0,travelMiles:tr.vehicleMiles,
-    personHours:0,balance:Math.max(0,total-n(job.paid)),warnings,
+    discount:sel.discount,minimum,minimumLabel:bind.label,subtotal,salesTax,total,profit,margin,grossProfit,grossMargin,operatingProfit,operatingMargin,perSqft:sqft&&br.quoteReady?total/sqft:0,travelMiles:tr.vehicleMiles,
+    personHours,balance:Math.max(0,total-n(job.paid)),warnings,unpricedLines:unpriced,
     quoteReady:br.quoteReady,quoteStatus:br.quoteReady?'ready':'pending_prices',pendingReasons:br.pendingUnique,
     catalog:{
       type:br.type,startingTotal:br.startingTotal,adjTotal:br.adjTotal,scopeTotal:br.scopeTotal,
@@ -842,7 +1038,18 @@ function calculate(job,settings){
  /* v5: job.moisture no longer auto-charges all finished sqft — per-area only. Legacy job.moisture ignored for charging. */
  if(n(job.patchKits)){addOrder('patch',n(job.patchKits));addBom('patch',n(job.patchKits));extras.push({label:'Minor patching allowance',description:'Patch kits and application; nonstructural repairs',qty:n(job.patchKits),unit:'kit',rate:n(r.patch),total:n(job.patchKits)*n(r.patch)})}
  const removal=!usesScheduledRemoval(job)&&job.condition!=='sound';if(removal&&sqft)extras.push({label:'Additional surface removal',description:job.condition==='adhesive'?'Existing adhesive removal':'Existing paint / coating removal',qty:sqft,unit:'sq ft',rate:n(r.removal),total:sqft*n(r.removal)});
- for(const row of collectOptionalExtras(job,settings))extras.push(row);
+ const optionalExtras=collectOptionalExtras(job,settings);
+ for(const row of optionalExtras)extras.push(row);
+ const unpriced=[...(optionalExtras.unpriced||[])];
+ let polySf=0;
+ for(const area of job.areas){
+  if(area.style==='level')continue;
+  if((area.topcoat||'')==='premium')polySf+=n(area.sqft);
+ }
+ if(polySf>0){
+  const polyRaw=settings.catalog&&settings.catalog.garage&&settings.catalog.garage.topcoatAdj&&settings.catalog.garage.topcoatAdj.premium;
+  addPolyLine(extras,unpriced,polySf,polyRaw);
+ }
  function kitLines(demand){const rows=[];for(const [key,q]of Object.entries(demand)){const x=p[key];if(!x)continue;const packs=ceil(q/Math.max(.001,n(x.size)));if(packs)rows.push({key,label:x.label,qty:packs,unit:(n(x.size)===1?x.unit+' units':n(x.size)+'-'+x.unit+' kits'),unitPrice:n(x.price),total:packs*n(x.price),volume:packs*n(x.size),volumeUnit:x.unit,demand:q})}return rows}
  const material=kitLines(orderDemand);
  const mat=overrideMat+kitLines(bomDemand).reduce((s,x)=>s+x.total,0);const tax=mat*n(c.purchaseTax)/100;
@@ -901,7 +1108,7 @@ function calculate(job,settings){
   else{project=discountable;rateShown=discountSqft?discountable/discountSqft:0;}
   const adjustment=project-discountable;
   const dollarPre=regularBase+adjustment;
-  const bind=bindingMinimum(settings,job,dollarPre,!!sqft);
+  const bind=bindingMinimum(settings,job,dollarPre,!!sqft,key);
   const minimum=bind.minimum;
   const pctLines=percentExtraLines(job,settings,dollarPre+minimum);
   const pctSum=r2(pctLines.reduce((s,x)=>s+n(x.total),0));
@@ -942,12 +1149,13 @@ function calculate(job,settings){
  if(type==='garage'&&garageUsesMeasured(job)){
    warnings.push('Garage >3-car / measured size: using measured sq ft with floor rate book (not a flat 1/2/3-car package).');
  }
- const result={sqft,finished,levelArea,levelEquiv,material,mat,tax,hours,labor,equipment,equip,direct,overhead,overheadBase,overheadItems,contingency,cost,lines:lines.concat(sel.percentLines||[]),base:regularBase,regularBase,discountable,discountSqft,choices,selected:sel,addOn,travel:tr,travelCost,travelInQuote,crew:tr.crew,discount,minimum,minimumLabel:sel.minimumLabel||'',subtotal,salesTax,total,profit,margin,grossProfit,grossMargin,operatingProfit,operatingMargin,perSqft:sqft?total/sqft:0,travelMiles,personHours,balance:Math.max(0,total-n(job.paid)),warnings,
+ for(const msg of unpriced)warnings.push(msg);
+ const result={sqft,finished,levelArea,levelEquiv,material,mat,tax,hours,labor,equipment,equip,direct,overhead,overheadBase,overheadItems,contingency,cost,lines:lines.concat(sel.percentLines||[]),base:regularBase,regularBase,discountable,discountSqft,choices,selected:sel,addOn,travel:tr,travelCost,travelInQuote,crew:tr.crew,discount,minimum,minimumLabel:sel.minimumLabel||'',subtotal,salesTax,total,profit,margin,grossProfit,grossMargin,operatingProfit,operatingMargin,perSqft:sqft?total/sqft:0,travelMiles,personHours,balance:Math.max(0,total-n(job.paid)),warnings,unpricedLines:unpriced,
    quoteReady:!!sqft,quoteStatus:sqft?'ready':'incomplete',pendingReasons:[],catalog:type==='garage'?{type:'garage',garagePackage:'measured',mode:'measured_sqft'}:null,finalizedBlocked:!sqft};
  return finishQuote(job,result,collected);
 }
-function describe(a){const names={solid:'Solid-color epoxy',flake:'Decorative flake epoxy',metallic:'Metallic epoxy',sealer:'Clear sealer + protective topcoat',level:'Self-leveling preparation only'};let s=names[a.style]||names.solid;if(a.style!=='level'){const col=(a.colorKey==='custom'&&a.customColor)?a.customColor:(a.color||'color to be confirmed');s+='; '+col;}if(a.style==='solid')s+='; '+Math.max(1,n(a.coats))+' base coat(s)';if(a.style==='flake'){s+='; '+(a.flake==='full'?'full broadcast':a.flake==='medium'?'medium broadcast':'light spot flakes');const fb=(a.flakeBlend==='custom'&&a.customFlakeBlend)?a.customFlakeBlend:(a.flakeBlendLabel||a.flakeBlend||'');if(fb)s+=', flake blend: '+fb;}if(a.grip&&a.style!=='level')s+='; slip-resistant texture';if(a.style==='level'||a.level)s+='; leveling '+n(a.depth)+' inch average';if(a.moisture||(a.prep&&a.prep.moisture))s+='; moisture-control primer/barrier on this area';return s;}
+function describe(a){const names={solid:'Solid-color epoxy',flake:'Decorative flake epoxy',metallic:'Metallic epoxy',sealer:'Clear sealer + protective topcoat',level:'Self-leveling preparation only'};let s=names[a.style]||names.solid;if(a.style!=='level'){const col=(a.colorKey==='custom'&&a.customColor)?a.customColor:(a.color||'color to be confirmed');s+='; '+col;}if(a.style==='solid')s+='; '+Math.max(1,n(a.coats))+' base coat(s)';if(a.style==='flake'){s+='; '+(a.flake==='full'?'full broadcast':a.flake==='medium'?'medium broadcast':'light spot flakes');const fb=(a.flakeBlend==='custom'&&a.customFlakeBlend)?a.customFlakeBlend:(a.flakeBlendLabel||a.flakeBlend||'');if(fb)s+=', flake blend: '+fb;}if(a.topcoat==='premium'&&a.style!=='level')s+='; Polyaspartic topcoat';if(a.grip&&a.style!=='level')s+='; slip-resistant texture';if(a.style==='level'||a.level)s+='; leveling '+n(a.depth)+' inch average';if(a.moisture||(a.prep&&a.prep.moisture))s+='; moisture-control primer/barrier on this area';return s;}
 function areaHasMoisture(a){return !!(a&&(a.moisture||(a.prep&&a.prep.moisture)))}
 function moistureSqft(job){let s=0;for(const a of job.areas||[]){const sf=n(a.sqft);if(!sf)continue;if(a.style==='level')continue;if(areaHasMoisture(a))s+=sf}return s}
-const api={defaults,newArea,newJob,newFlatItem,newSeatItem,calculate,describe,n,sn,travelInfo,addOnInfo,crewSize,areaHasMoisture,moistureSqft,isConfigured,configuredAmount,projectTypeOf,garageUsesMeasured,garageStartingKey,flatworkBandForSqft,buildCatalogBreakdown,catalogDefaults,garagePackageDefaults,UNCONFIGURED,marginToMarkup,markupToMargin,overheadMonthlyTotal,overheadPerHourRate,overheadSpread,FIGURE_STATUS,OVERHEAD_LINES,minimumJobAmount,allowancesIncluded,blankExtras,packageTablePrice,smallSolidFloorAmount,solidSystemSqft};if(typeof module!=='undefined'&&module.exports)module.exports=api;root.EpoxyEngine=api;
+const api={defaults,newArea,newJob,newFlatItem,newSeatItem,calculate,describe,n,sn,travelInfo,addOnInfo,crewSize,areaHasMoisture,moistureSqft,isConfigured,configuredAmount,projectTypeOf,garageUsesMeasured,garageStartingKey,flatworkBandForSqft,buildCatalogBreakdown,catalogDefaults,garagePackageDefaults,UNCONFIGURED,marginToMarkup,markupToMargin,overheadMonthlyTotal,overheadPerHourRate,overheadSpread,FIGURE_STATUS,OVERHEAD_LINES,minimumJobAmount,allowancesIncluded,blankExtras,packageTablePrice,smallSolidFloorAmount,solidSystemSqft,normalizeStaffPackages};if(typeof module!=='undefined'&&module.exports)module.exports=api;root.EpoxyEngine=api;
 })(typeof window!=='undefined'?window:globalThis);

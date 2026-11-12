@@ -28,7 +28,9 @@ function priceStop(x,owner,body){
 /* identical semantics to guided-app.js merge(): only keys present in defaults are taken */
 function merge(target,source){for(const k of Object.keys(target)){if(source&&Object.prototype.hasOwnProperty.call(source,k)){if(target[k]&&typeof target[k]==='object'&&!Array.isArray(target[k])&&source[k]&&typeof source[k]==='object'&&!Array.isArray(source[k]))merge(target[k],source[k]);else target[k]=source[k]}}return target}
 function deepMergeSettings(E,stored){
-  const out=merge(clone(E.defaults),stored||{});
+  const src=clone(stored||{});
+  if(E.normalizeStaffPackages)E.normalizeStaffPackages(src);
+  const out=merge(clone(E.defaults),src);
   if(!out.catalog)out.catalog=clone(E.defaults.catalog);
   else out.catalog=merge(clone(E.defaults.catalog),out.catalog);
   return out;
@@ -143,7 +145,7 @@ function recordedDiscountAmount(snapshot){
   return Math.round(x*100)/100;
 }
 function customerVisibleLines(x){
-  return (x.lines||[]).filter(l=>{const k=l.kind||'';return k!=='mileage'&&k!=='travel'&&k!=='equipment'&&k!=='overhead'&&k!=='equip'});
+  return (x.lines||[]).filter(l=>{const k=l.kind||'';return k!=='mileage'&&k!=='travel'&&k!=='equipment'&&k!=='overhead'&&k!=='equip'&&k!=='unpriced'});
 }
 function quoteAllocation(x){
   const subtotal=n(x.subtotal),salesTax=n(x.salesTax),total=n(x.total);
@@ -203,6 +205,7 @@ function staffSnapshot(E,job,x,settings){
 function internalSnapshot(x,markupPct){
   return{cost:n(x.cost),profit:n(x.profit),margin:n(x.margin),mat:n(x.mat),tax:n(x.tax),labor:n(x.labor),equip:n(x.equip),
     direct:n(x.direct),overhead:n(x.overhead),overheadBase:n(x.overheadBase),contingency:n(x.contingency),
+    grossProfit:n(x.grossProfit),grossMargin:n(x.grossMargin),operatingProfit:n(x.operatingProfit),operatingMargin:n(x.operatingMargin),
     travelCost:n(x.travelCost),travelInQuote:n(x.travelInQuote),markupPct:markupPct==null?null:n(markupPct)};
 }
 function isCatalogJob(E,j){const t=E.projectTypeOf(j);return t==='flatwork'||t==='seating'||(t==='garage'&&!E.garageUsesMeasured(j))}

@@ -148,16 +148,16 @@ check('a valid custom rate is still kept on every tier',()=>{
   assert.strictEqual(x.lines.find(l=>l.kind==='finish').customRate,true);
 });
 
-check('add-in of $2,250 on 450 sq ft is blocked and not multiplied',()=>{
+check('add-in of $2,250 on 450 sq ft does not block the quote and is not multiplied',()=>{
   const settings=JSON.parse(JSON.stringify(E.defaults));
   settings.addOn.low=2250;
   const j=floorJob(450,'flake',{addOnIncluded:true});
   const x=E.calculate(j,settings);
   assert.notStrictEqual(x.total,1017000);
   assert.strictEqual(x.total,4500);
-  assert.ok(msgs(x).includes('Standard add-in / sq ft'));
-  assert.ok(msgs(x).includes('outside $0–$40'));
-  assert.strictEqual(x.quoteReady,false);
+  assert.ok(S.bookIssues(settings).blocks.some(b=>/Standard add-in/.test(b.message)));
+  assert.strictEqual(x.quoteReady,true);
+  assert.ok(!msgs(x).includes('Standard add-in / sq ft'));
 });
 
 check('option tier rate of $2,250 on 450 sq ft is blocked and not multiplied',()=>{
@@ -422,16 +422,17 @@ check('blended and measured-total boundaries',()=>{
     assert.ok((seen.body.staff.pendingReasons||[]).join(' ').includes('This looks like square footage, not a price per sq ft.'));
   });
 
-  await checkAsync('server blocks a $2,250 per-sqft add-in',async()=>{
+  await checkAsync('server does not block a quote for an unused out-of-range add-in',async()=>{
     const job=floorJob(450,'flake',{addOnIncluded:true});
-    const out=await record(job,'owner',{addOn:{low:2250,high:2}});
-    assert.strictEqual(out.res.status,422);
-    assert.strictEqual(out.recorded,0);
-    assert.ok(out.res.body.error.includes('Standard add-in / sq ft'),out.res.body.error);
-    assert.ok(out.res.body.error.includes('outside $0–$40'));
-    const seen=await preview(job,'owner',{addOn:{low:2250,high:2}});
+    const staff={addOn:{low:2250,high:2}};
+    const out=await record(job,'owner',staff);
+    assert.strictEqual(out.res.status,200);
+    assert.strictEqual(out.recorded,1);
+    assert.strictEqual(out.res.body.customer.totals.total,4500);
+    const seen=await preview(job,'owner',staff);
     assert.notStrictEqual(seen.body.staff.total,1017000);
     assert.strictEqual(seen.body.staff.total,4500);
+    assert.ok(S.bookIssues(Q.buildSettings(E,staff,{})).blocks.some(b=>/Standard add-in/.test(b.message)));
   });
 
   await checkAsync('server blocks an option tier rate of $2,250',async()=>{
