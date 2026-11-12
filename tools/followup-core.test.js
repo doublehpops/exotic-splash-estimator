@@ -399,7 +399,7 @@ check('migrations are newer than 20261112183000 and contain no secrets',()=>{
   for(const name of ['epoxy-engine.js','quote-core.js','price-sanity.js','discount-approval.js']){
     assert.strictEqual(read('js/'+name),read('supabase/functions/_shared/'+name),name);
   }
-  const files=['supabase/migrations/20261112203000_job_followups.sql','supabase/migrations/20261112204500_followup_dispatch_cron.sql'];
+  const files=['supabase/migrations/20261112203000_job_followups.sql','supabase/migrations/20261112211500_followup_dispatch_cron.sql'];
   for(const file of files){
     assert.ok(file.slice(file.lastIndexOf('/')+1,file.lastIndexOf('/')+15)>'20261112183000',file);
     const sql=read(file);

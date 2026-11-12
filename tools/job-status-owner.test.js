@@ -8,7 +8,7 @@ function check(name,fn){try{fn();console.log('ok',name);}catch(e){failed++;conso
 
 const root=path.join(__dirname,'..');
 const read=rel=>fs.readFileSync(path.join(root,rel),'utf8');
-const sql=read('supabase/migrations/20261112190000_jobs_status_owner_only.sql');
+const sql=read('supabase/migrations/20261112210000_jobs_status_owner_only.sql');
 
 /* JS mirror of private.jobs_guard_status(). A trusted server write and an
  * owner write may change status. Anyone else, including an employee, may not.
@@ -22,10 +22,13 @@ function statusChangeAllowed(input){
   return {ok:false,code:'42501',error:'Only the owner can change job status'};
 }
 
-check('migration is later than every other file and does not remove rows',()=>{
+check('migration sorts after the applied follow-up migration and does not remove rows',()=>{
   const names=fs.readdirSync(path.join(root,'supabase/migrations')).filter(n=>n.endsWith('.sql'));
   const versions=names.map(n=>n.slice(0,14)).sort();
-  assert.strictEqual(versions[versions.length-1],'20261112190000');
+  assert.ok(versions.includes('20261112210000'));
+  assert.ok(versions.indexOf('20261112210000')>versions.indexOf('20261112203000'));
+  assert.ok(!versions.includes('20261112190000'));
+  assert.ok(versions.indexOf('20261112211500')>versions.indexOf('20261112210000'));
   assert.ok(sql.includes('Not applied by the pull request that adds this file'));
   assert.ok(sql.includes('private.is_owner()'));
   assert.ok(sql.includes("current_setting('es.trusted_job_write', true)"));
