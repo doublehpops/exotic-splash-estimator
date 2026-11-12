@@ -324,6 +324,12 @@ function priceBookPanelHTML(){
   </section>`;
 }
 async function savePriceBook(){
+  const S=W.EsPriceSanity;
+  if(S){
+    const found=S.bookIssues(G().state.settings);
+    if(found.blocks.length){toast(found.blocks[0].message);return}
+    if(found.warnings.length&&!G().perSqftAcked()){toast(found.warnings[0].message+' Tap Looks right, continue before saving.');return}
+  }
   const reason=($('esPriceReason')||{}).value||'';
   const split=Q().splitSettings(G().state.settings);
   try{
@@ -414,10 +420,12 @@ function sharePanelHTML(j,x){
 }
 async function createShare(){
   const j=G().activeJob();if(!j._serverId){toast('Job not saved yet.');return}
+  const gate=G().issueGate?G().issueGate(j):{ok:true,acked:false};
+  if(!gate.ok){toast(gate.message);return}
   dirty.add(j.id);await flush();
   if(dirty.has(j.id)){toast('Save the job first (see status).');return}
   try{
-    const rec=await cloud.quote('record',j._serverId);
+    const rec=await cloud.quote('record',j._serverId,null,{sanityContinue:!!gate.acked});
     if(!rec.customer||!rec.customer.quoteReady){toast('Server says the quote is still Pending — link not created.');return}
     const days=Number(($('esShareDays')||{}).value)||30;
     const s=await cloud.createShare(j._serverId,days);

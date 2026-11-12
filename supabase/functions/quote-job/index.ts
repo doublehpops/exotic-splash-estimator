@@ -2,6 +2,7 @@
 // and SUPABASE_SERVICE_ROLE_KEY injected by the platform. They are not in this file.
 // Discount decisions go through public RPCs on the caller's JWT, not the service role.
 import { createClient } from "npm:@supabase/supabase-js@2.119.0";
+import "../_shared/price-sanity.js";
 import "../_shared/discount-approval.js";
 import "../_shared/epoxy-engine.js";
 import "../_shared/quote-core.js";
