@@ -252,7 +252,9 @@ function syncPrepIntoEngineFields(job){
 }
 function merge(target,source){for(const k of Object.keys(target)){if(source&&Object.prototype.hasOwnProperty.call(source,k)){if(target[k]&&typeof target[k]==='object'&&!Array.isArray(target[k])&&source[k]&&typeof source[k]==='object'&&!Array.isArray(source[k]))merge(target[k],source[k]);else target[k]=source[k]}}return target}
 function deepMergeSettings(stored){
-  const out=merge(clone(E.defaults),stored||{});
+  const src=clone(stored||{});
+  if(E.normalizeStaffPackages)E.normalizeStaffPackages(src);
+  const out=merge(clone(E.defaults),src);
   // Ensure catalog tree exists even when migrating older saves
   if(!out.catalog)out.catalog=clone(E.defaults.catalog);
   else {
@@ -580,6 +582,8 @@ function stripCosts(x){
   y.travel=Object.assign({},x.travel||{},{rate:0,mileage:0,crewTravel:0});
   y.material=(x.material||[]).map(m=>Object.assign({},m,{unitPrice:0,total:0}));
   y.equipment=(x.equipment||[]).map(m=>Object.assign({},m,{unitPrice:0,total:0}));
+  y.hours=(x.hours||[]).map(h=>({label:h.label,qty:E.n(h.qty)}));
+  y.overheadItems=[];
   y.lines=(x.lines||[]).filter(l=>!['mileage','travel','equipment','overhead','equip'].includes(l.kind||''));
   return y;
 }
@@ -750,6 +754,12 @@ function projectTypePickerHTML(j){
   ];
   return `<div class="project-type-grid">${types.map(([id,label,help])=>`<button type="button" class="project-type-card ${j.projectType===id?'active':''}" data-project-type="${id}" aria-pressed="${j.projectType===id}"><span class="opt-name">${escape(label)}</span><span class="opt-meta">${escape(help)}</span></button>`).join('')}</div>`;
 }
+function multiColorFieldsHTML(j){
+  const style=j.garageStyle||'';
+  if(style==='metallic')return `<div class="fields">${select('Metallic colors','job.garageMetallicColors',[[1,'1 color — included'],[2,'2 colors — included'],[3,'3 colors'],[4,'4 colors']],'1 or 2 colors are in the package price. 3 or 4 add the Price book rate per sq ft, including overflow. 5 is not allowed.')}</div>`;
+  if(style==='flake')return `<div class="fields">${select('Flake blend','job.garageFlakeBlend',[['stock','Stock blend — included'],['custom','Custom blend']])}${j.garageFlakeBlend==='custom'?select('Colors in the custom blend','job.garageFlakeColors',[[1,'1'],[2,'2'],[3,'3'],[4,'4']],'Up to 4 colors. A custom blend adds the Price book rate per sq ft, including overflow.'):''}</div>`;
+  return '';
+}
 function optionalExtrasHTML(j,base){
   const ex=j.extras||{};
   const root=base+'.extras';
@@ -794,13 +804,14 @@ function garagePackageHTML(j){
   };
   return `<div class="fields">${pkgs.map(([id,label])=>'').join('')}
     <div class="finish-picker" role="group">${pkgs.map(([id,label])=>`<button type="button" class="finish-choice ${j.garagePackage===id?'active':''}" data-garage-package="${id}" aria-pressed="${j.garagePackage===id}"><b>${escape(label)}</b><small style="display:block;margin-top:4px;font-size:10px;color:var(--muted)">${escape(startFor(id))}</small></button>`).join('')}</div>
-    ${j.garagePackage!=='measured'?`${(cat.disclaimer||'').trim()?`<div class="warn-banner"><b>Garage package baseline:</b> ${escape(cat.disclaimer.trim())}</div>`:''}<div class="notice">Package price comes from the tier, system, and size table (1-car 250 sq ft, 2-car 450 sq ft, 3-car 650 sq ft). Square feet above that size use that tier’s per-sq-ft rate for the chosen system. The solid credit is not subtracted when the table has a price. A solid package under 500 sq ft is at least $2,750 in every tier, so 1-car solid Option 1 is $2,750. The $2,000 job minimum still applies.</div>
+    ${j.garagePackage!=='measured'?`${(cat.disclaimer||'').trim()?`<div class="warn-banner"><b>Garage package baseline:</b> ${escape(cat.disclaimer.trim())}</div>`:''}<div class="notice">Package price comes from the tier, system, and size table (1-car 250 sq ft, 2-car 450 sq ft, 3-car 650 sq ft). Square feet above that size use that tier’s per-sq-ft rate for the chosen system. The solid credit is not subtracted when the table has a price. A solid package under 400 sq ft is at least $2,750, so 1-car solid Option 1 is $2,750. From 400 to 499 sq ft the quote shows one solid-floor minimum line. 500 sq ft and above are unchanged. The $2,000 job minimum still applies.</div>
       <div class="fields">${field('Measured sq ft','job.areas.0.sqft','number','Leave blank to price the typical size only. Square feet above 250 / 450 / 650 use the tier rate.','step="1"')}</div>
       <div class="fields three">
         ${select('Material / system','job.garageStyle',[['solid','Solid'],['flake','Flake'],['metallic','Metallic'],['sealer','Clear seal — use measured sq ft'],['custom','Custom — inspection / override']])}
-        ${select('Topcoat','job.garageTopcoat',[['protective','Protective (standard)'],['none','None noted'],['premium','Premium / upgraded']])}
+        ${select('Topcoat','job.garageTopcoat',[['protective','Protective (standard)'],['none','None noted'],['premium','Polyaspartic topcoat']])}
         ${select('Concrete condition','job.garageCondition',[['unknown','Unknown / not inspected'],['good','Good'],['fair','Fair'],['poor','Poor'],['critical','Critical'],['sound','Sound / bare'],['paint','Paint / coating present'],['adhesive','Adhesive residue']])}
       </div>
+      ${multiColorFieldsHTML(j)}
       <p class="hint">Spalling means the concrete surface is flaking or crumbling.</p>
       <div class="checklist">${[['cracks','Cracks / joints'],['spalling','Poor slab / spalling'],['coatingRemoval','Coating removal'],['paintRemoval','Paint removal'],['patching','Patching'],['leveling','Leveling'],['moisture','Moisture barrier']].map(([k,l])=>{
         const on=!!(j.garagePrep&&j.garagePrep[k]);
@@ -830,7 +841,9 @@ function flatworkItemsHTML(j){
         ${select('Size band',base+'.sizeBand',[['',('Auto from sq ft')]].concat(bands.map(b=>[b.id,b.label+(E.isConfigured(b.starting)?' · '+cash(Number(b.starting)):' · Starting price needed')])))}
 
         ${select('Material / system',base+'.style',[['solid','Solid'],['flake','Flake'],['metallic','Metallic'],['sealer','Clear seal'],['custom','Custom']])}
-        ${select('Topcoat',base+'.topcoat',[['protective','Protective'],['none','None'],['premium','Premium']])}
+        ${it.style==='metallic'?select('Metallic colors',base+'.metallicColors',[[1,'1 color — included'],[2,'2 colors — included'],[3,'3 colors'],[4,'4 colors']],'3 or 4 colors add the Price book rate on this item’s sq ft. 5 is not allowed.'):''}
+        ${it.style==='flake'?select('Flake blend',base+'.flakeBlend',[['stock','Stock blend — included'],['custom','Custom blend']])+(it.flakeBlend==='custom'?select('Colors in the custom blend',base+'.flakeColors',[[1,'1'],[2,'2'],[3,'3'],[4,'4']],'Up to 4. A custom blend adds the Price book rate per sq ft.'):''):''}
+        ${select('Topcoat',base+'.topcoat',[['protective','Protective'],['none','None'],['premium','Polyaspartic topcoat']])}
         ${select('Condition',base+'.condition',[['unknown','Unknown / not inspected'],['good','Good'],['fair','Fair'],['poor','Poor'],['critical','Critical']])}
         ${field('Item starting price override ($)',base+'.customStarting','number','Optional. Blank keeps the size-band price. A blank override is not a missing package price.','step="any"')}
       </div>
@@ -854,7 +867,7 @@ function seatingItemsHTML(j){
         ${select('Type',base+'.seatType',[['chair','Chair · '+tip('chair')],['stool','Stool · '+tip('stool')],['other','Other · '+tip('other')]])}
         ${field('Quantity',base+'.qty','number','','step="1"')}
         ${select('Material / system',base+'.style',[['solid','Solid'],['flake','Flake'],['metallic','Metallic'],['sealer','Clear seal'],['custom','Custom']])}
-        ${select('Topcoat',base+'.topcoat',[['protective','Protective'],['none','None'],['premium','Premium']])}
+        ${select('Topcoat',base+'.topcoat',[['protective','Protective'],['none','None'],['premium','Polyaspartic topcoat']])}
         ${select('Condition',base+'.condition',[['unknown','Unknown / not inspected'],['good','Good'],['fair','Fair'],['poor','Poor'],['critical','Critical']])}
         ${field('Per-item starting override ($)',base+'.customStarting','number','Blank uses type price book','step="any"')}
       </div>
@@ -1000,6 +1013,7 @@ function colorPaletteHTML(a,i){
     <p class="method-note">On-screen colors are <b>approximate</b>. Confirm physical samples and manufacturer availability before ordering. Compatibility with text field: selection writes into Floor color.</p>
     <div class="color-palette" role="listbox">${swatches}</div>
     ${a.colorKey==='custom'?field('Custom color description',base+'.customColor','text','Type the requested color / code — availability TBD'):field('Color name (editable)',base+'.color','text','Kept in sync with palette; edit for notes')}
+    ${a.style==='metallic'?select('Metallic colors',base+'.metallicColors',[[1,'1 color — included'],[2,'2 colors — included'],[3,'3 colors'],[4,'4 colors']],'1 or 2 colors are in the base price. 3 or 4 add the Price book rate per sq ft. 5 is not allowed.'):''}
   </div>`;
 }
 function flakePaletteHTML(a,i){
@@ -1012,7 +1026,7 @@ function flakePaletteHTML(a,i){
   return `<div class="palette-block"><span class="eyebrow">FLAKE COLOR / BLEND</span>
     <p class="method-note">Common neutral blends for planning. Does <b>not</b> claim manufacturer stock or exact match — confirm samples.</p>
     <div class="color-palette" role="listbox">${swatches}</div>
-    ${a.flakeBlend==='custom'?field('Custom flake blend description',base+'.customFlakeBlend','text','Describe desired blend — availability TBD'):''}
+    ${a.flakeBlend==='custom'?field('Custom flake blend description',base+'.customFlakeBlend','text','Describe desired blend — availability TBD')+select('Colors in the custom blend',base+'.flakeColors',[[1,'1'],[2,'2'],[3,'3'],[4,'4']],'Up to 4 colors. A custom blend adds the Price book rate per sq ft. A stock blend is included.'):'<p class="method-note">A stock blend is included. Choose Custom blend to add colors. The add-on is per sq ft, not a discount.</p>'}
   </div>`;
 }
 function stepSelections(j){
@@ -1021,8 +1035,9 @@ function stepSelections(j){
     return `<section class="card">${cardHead('04','System confirmation','Material / topcoat already set on catalog items')}
     ${priceNeededBanner(x)}
     <div class="notice">Material/system and topcoat selections on catalog items <b>must change price</b> via configured adjustments — not description-only. Configure adjustments under Costs &amp; pricing → Catalog packages. Color palettes for measured floors remain on floor jobs.</div>
-    <p class="method-note">Garage package: style <b>${escape(j.garageStyle||'—')}</b> · topcoat <b>${escape(j.garageTopcoat||'—')}</b> · condition <b>${escape(j.garageCondition||'unknown')}</b>.</p>
-    ${(j.catalogItems||[]).map((it,i)=>`<p class="method-note">Item ${i+1}: <b>${escape(it.name||'Item')}</b> · ${escape(it.style||'solid')} · topcoat ${escape(it.topcoat||'protective')} · condition ${escape(it.condition||'unknown')}</p>`).join('')}
+    <p class="method-note">Garage package: style <b>${escape(j.garageStyle||'—')}</b> · topcoat <b>${escape(j.garageTopcoat==='premium'?'Polyaspartic topcoat':(j.garageTopcoat||'—'))}</b> · condition <b>${escape(j.garageCondition||'unknown')}</b>.</p>
+    ${(j.projectType==='garage'&&!E.garageUsesMeasured(j))?`<div class="area-options">${checkbox('Slip-resistant texture','job.extras.antiSlip')}</div><p class="method-note">Same option as a measured floor. It uses the Price book anti-slip rate on the package size, plus any overflow sq ft, as its own line.</p>${multiColorFieldsHTML(j)}`:''}
+    ${(j.catalogItems||[]).map((it,i)=>`<p class="method-note">Item ${i+1}: <b>${escape(it.name||'Item')}</b> · ${escape(it.style||'solid')} · topcoat ${escape(it.topcoat==='premium'?'Polyaspartic topcoat':(it.topcoat||'protective'))} · condition ${escape(it.condition||'unknown')}</p>`).join('')}
     </section>`;
   }
   return `<section class="card">${cardHead('04','System & finish selections','System · base color · flake blend · topcoat · grip')}
@@ -1036,7 +1051,7 @@ function stepSelections(j){
       <div class="fields">
         ${a.style==='solid'?select('Base coats',base+'.coats',[[1,'1 base coat'],[2,'2 base coats']]):''}
         ${a.style==='flake'?select('Flake coverage',base+'.flake',[['light','Light / spot'],['medium','Medium broadcast'],['full','Full broadcast']]):''}
-        ${a.style!=='level'?select('Topcoat',base+'.topcoat',[['protective','Protective topcoat (standard allowance)'],['none','No separate topcoat note']]):''}
+        ${a.style!=='level'?select('Topcoat',base+'.topcoat',[['protective','Protective topcoat (standard allowance)'],['none','No separate topcoat note'],['premium','Polyaspartic topcoat']]):''}
         ${rateOverrideField(a,base)}
       </div>
       <details class="more-options"><summary>More options</summary><div class="detail-body">
@@ -1094,7 +1109,7 @@ function travelFormulaHTML(x){
   return `<b>Mileage:</b> ${num(t.oneWay)} mi one way × 2 × ${num(t.trips)} visit(s) × ${num(t.vehicles)} vehicle(s) = <b>${num(t.vehicleMiles)} vehicle miles</b> ${mileBit}<br/><b>Crew travel:</b> ${crewBit}`;
 }
 function customerVisibleLines(x){
-  return (x.lines||[]).filter(l=>{const k=l.kind||'';return k!=='mileage'&&k!=='travel'&&k!=='equipment'&&k!=='overhead'&&k!=='equip';});
+  return (x.lines||[]).filter(l=>{const k=l.kind||'';return k!=='mileage'&&k!=='travel'&&k!=='equipment'&&k!=='overhead'&&k!=='equip'&&k!=='unpriced';});
 }
 
 /** Selling-price planning allocation from approved customer quote (includes markup/upcharge).
@@ -1201,7 +1216,7 @@ function equipmentPlan(j,x){
   if(j.areas.some(a=>a.prep&&(a.prep.coatingRemoval||a.prep.adhesive))||j.condition==='paint'||j.condition==='adhesive')items.push('Coating / adhesive removal tooling');
   if(j.areas.some(a=>a.level||a.style==='level'||(a.prep&&a.prep.leveling)))items.push('Self-leveling mixer / gauge rake / spiked rollers');
   if(j.areas.some(a=>a.style==='flake'))items.push('Flake broadcast & recovery tools');
-  if(j.areas.some(a=>a.grip))items.push('Slip-resistant texture additive');
+  if(j.areas.some(a=>a.grip)||(j.extras&&j.extras.antiSlip))items.push('Slip-resistant texture additive');
   if(E.n(j.patchKits)||j.areas.some(a=>a.prep&&(a.prep.patching||a.prep.spalling)))items.push('Concrete patch kits');
   return items;
 }
@@ -1222,6 +1237,7 @@ function ownerViewHTML(){
       <div class="summary-row"><span>Approved adjustment limit</span><strong>${approvedAdjustmentLabel()}</strong></div>
       <button type="button" class="button secondary" data-view="internal">Internal job-cost and travel</button>
     </div>
+    ${(x.unpricedLines||[]).length?`<div class="warn-banner"><b>Add-on price not set.</b> The base total does not include it.<ul>${x.unpricedLines.map(t=>'<li>'+escape(t)+'</li>').join('')}</ul></div>`:''}
     ${warnShow.length?`<div class="notice ${x.profit<0?'error':''}">${warnShow.map(escape).join('<br/><br/>')}</div>`:''}
   </div></details>`;
 }
@@ -1346,8 +1362,8 @@ function ratesView(){
   <details open><summary>Payment tiers & property add-in ${owner?'':'🔒'}</summary><div class="detail-body"><p>Regular is 7 / 10 / 15. Option 1 is bank transfer, 5 / 8 / 11, half at booking and half at the final walkthrough. Option 2 is 6 / 9 / 13, with 50%, 25%, and 25% within 14 days. Tiers do not stack and there is no extra 40% off. Prep and removal stay at their own prices. No material surcharge is added.</p>${['opt1','opt2'].map(k=>`<div class="fields three" style="margin-bottom:14px">${lockedField('Option label','settings.pricingOptions.'+k+'.label')}${lockedField('Solid / sq ft','settings.pricingOptions.'+k+'.rates.solid','number','$0–$40 per sq ft.','min="0" max="40" step="0.01" inputmode="decimal"')}${lockedField('Flake / sq ft','settings.pricingOptions.'+k+'.rates.flake','number','$0–$40 per sq ft.','min="0" max="40" step="0.01" inputmode="decimal"')}${lockedField('Metallic / sq ft','settings.pricingOptions.'+k+'.rates.metallic','number','$0–$40 per sq ft.','min="0" max="40" step="0.01" inputmode="decimal"')}${state.settings.pricingOptions[k].schedule.map((p,i)=>lockedField((p.label||('Payment '+(i+1)))+' %','settings.pricingOptions.'+k+'.schedule.'+i+'.pct','number')).join('')}</div>`).join('')}
   <p class="method-note">The property / trip add-in is folded into the base price. It is not a separate line. Defaults stay at $0.</p>
   ${lockedField('Minimum job charge ($)','settings.rates.minimumJob','number','Applied with the small-solid floor. The higher one wins. An owner-approved discount can go below it. Employees cannot.'+statusTag(E.FIGURE_STATUS.minimumJob),'min="0" step="1"')}
-  ${lockedField('Small solid floor — under (sq ft)','settings.rates.smallSolidFloor.maxSqft','number','A solid-system job whose solid sq ft is under this size uses the floor below, in every tier. Count is the job total, not each area.')}
-  ${lockedField('Small solid floor minimum ($)','settings.rates.smallSolidFloor.min','number','Default $2,750 under 500 sq ft. 1-car solid Option 1 ($2,600) becomes $2,750.')}
+  ${lockedField('Small solid floor — under (sq ft)','settings.rates.smallSolidFloor.maxSqft','number','Solid sq ft under this size uses the minimum below, or the per-sqft price when that is higher. Default 500. The count is the job total, not each area.')}
+  ${lockedField('Small solid floor minimum ($)','settings.rates.smallSolidFloor.min','number','Default $2,750 under 500 sq ft, including 400–499. A 1-car solid Option 1 package ($2,600) becomes $2,750.')}
   </div></details>
   <details><summary>Optional extras ${owner?'':'🔒'}</summary><div class="detail-body">
   <p class="method-note">Selling prices for optional lines. Moisture primer and self-leveling stay on the rates above ($4/sq ft and $6/sq ft at 1/4 inch). Per-sq-ft extras above $40 are blocked.</p>
@@ -1370,6 +1386,8 @@ function ratesView(){
     ${lockedField('Countertop metallic ($/sq ft)','settings.extras.countertop.metallic','number')}
     ${lockedField('Countertop minimum ($)','settings.extras.countertop.min','number')}
     ${lockedField('Anti-slip ($/sq ft)','settings.extras.antiSlip.perSqft','number')}
+    ${lockedField('Metallic 3–4 colors ($/sq ft)','settings.extras.multiColor.metallicPerSqft','number','Added on metallic floors, garage packages, and countertops when 3 or 4 colors are chosen. 1 or 2 are included.','min="0" max="40" step="0.01"')}
+    ${lockedField('Custom flake blend ($/sq ft)','settings.extras.multiColor.customFlakePerSqft','number','Added when a flake job uses a custom blend. A stock blend is included. Up to 4 colors.','min="0" max="40" step="0.01"')}
     ${lockedField('Travel past 25 miles ($/mile)','settings.extras.travelBeyond.perMile','number')}
     ${lockedField('Moving ($/hour)','settings.extras.moving.perHour','number')}
     ${lockedField('Rush (%)','settings.extras.rush.pct','number')}
@@ -1391,23 +1409,23 @@ function ratesView(){
   </div></details>`}
   <details><summary>Business wording ${owner?'':'🔒'}</summary><div class="detail-body"><div class="fields">${lockedField('Business name','settings.business.name')}${lockedField('Business phone','settings.business.phone')}${lockedField('Business address','settings.business.address')}${lockedField('Business email','settings.business.email','email')}${owner?textArea('Competitive pricing review wording','settings.notes'):`<div class="field locked"><label>Competitive pricing review wording <span class="lock-pill">OWNER ONLY</span></label><textarea disabled readonly>${escape(state.settings.notes||'')}</textarea></div>`}</div>${crewSettingsHTML()}</div></details>
   <details open><summary>Catalog packages — starting prices & adjustments ${owner?'':'🔒'}</summary><div class="detail-body">
-  <div class="notice"><b>Garage packages</b> use the tier / system / size table. Overflow past 250 / 450 / 650 sq ft uses that tier’s rate for the system. The solid credit is kept for books with no table. A solid package under 500 sq ft is at least $2,750. Flatwork above 32 sq ft is quoted per sq ft.</div>
+  <div class="notice"><b>Garage packages</b> use the tier / system / size table. Overflow past 250 / 450 / 650 sq ft uses that tier’s rate for the system. The solid credit is kept for books with no table. A solid package under 400 sq ft is at least $2,750. From 400 to 499 sq ft a solid floor shows one minimum line. Flatwork above 32 sq ft is quoted per sq ft.</div>
   <h4 style="margin:12px 0 6px;font-size:13px">Package price table</h4>
   ${[['opt1','Option 1'],['opt2','Option 2'],['regular','Regular']].map(([tier,label])=>`<h4 style="margin:10px 0 6px;font-size:13px">${label}</h4><div class="fields three">${['solid','flake','metallic'].map(sys=>['oneCar','1-car','twoCar','2-car','threeCar','3-car'].reduce((html,part,i,arr)=>{if(i%2)return html;return html+lockedField(sys+' '+arr[i+1]+' ($)','settings.garage.packages.'+tier+'.'+sys+'.'+part,'number');},'')).join('')}</div>`).join('')}
   <h4 style="margin:12px 0 6px;font-size:13px">Garage packages</h4>
   ${((state.settings.catalog&&state.settings.catalog.garage&&state.settings.catalog.garage.disclaimer)||'').trim()?`<div class="warn-banner"><b>Garage package baseline:</b> ${escape(String(state.settings.catalog.garage.disclaimer).trim())}</div>`:''}
   <div class="fields three">${lockedField('1-car typical sq ft','settings.catalog.garage.packageSqft.oneCar','number','Base fee uses this size × the flake tier rate.')}${lockedField('2-car typical sq ft','settings.catalog.garage.packageSqft.twoCar','number')}${lockedField('3-car typical sq ft','settings.catalog.garage.packageSqft.threeCar','number')}</div>
   <p class="method-note">>3-car must use measured sq ft (floor rate book). The stored package dollar starts are not the quote; the flake tier × typical size is.</p>
-  <div class="fields three">${catalogAdjFields('Solid credit','settings.catalog.garage.materialAdj.solid')}${lockedField('Material adj · flake ($)','settings.catalog.garage.materialAdj.flake','number','0 means included in the base fee.','min="-10000" step="1"')}${lockedField('Material adj · metallic ($)','settings.catalog.garage.materialAdj.metallic','number','','min="-10000" step="1"')}${lockedField('Material adj · sealer ($)','settings.catalog.garage.materialAdj.sealer','number','','min="-10000" step="1"')}${lockedField('Material adj · custom ($)','settings.catalog.garage.materialAdj.custom','number','','min="-10000" step="1"')}${lockedField('Topcoat adj · premium ($)','settings.catalog.garage.topcoatAdj.premium','number','','min="-10000" step="1"')}</div>
+  <div class="fields three">${catalogAdjFields('Solid credit','settings.catalog.garage.materialAdj.solid')}${lockedField('Material adj · flake ($)','settings.catalog.garage.materialAdj.flake','number','0 means included in the base fee.','min="-10000" step="1"')}${lockedField('Material adj · metallic ($)','settings.catalog.garage.materialAdj.metallic','number','','min="-10000" step="1"')}${lockedField('Material adj · sealer ($)','settings.catalog.garage.materialAdj.sealer','number','','min="-10000" step="1"')}${lockedField('Material adj · custom ($)','settings.catalog.garage.materialAdj.custom','number','','min="-10000" step="1"')}${lockedField('Polyaspartic topcoat ($/sq ft)','settings.catalog.garage.topcoatAdj.premium','number','Best topcoat. Per sq ft on the package size (250 / 450 / 650) or the measured floor. Blank leaves the base price and does not block the quote.','min="0" max="40" step="0.01"')}</div>
   <div class="fields three">${lockedField('Condition · unknown ($)','settings.catalog.garage.conditionAdj.unknown','number','Do not leave blank if unknown jobs must price')}${lockedField('Condition · fair ($)','settings.catalog.garage.conditionAdj.fair','number')}${lockedField('Condition · poor ($)','settings.catalog.garage.conditionAdj.poor','number')}${lockedField('Condition · critical ($)','settings.catalog.garage.conditionAdj.critical','number')}${lockedField('Condition · paint ($)','settings.catalog.garage.conditionAdj.paint','number')}${lockedField('Condition · adhesive ($)','settings.catalog.garage.conditionAdj.adhesive','number')}</div>
   <div class="fields three">${lockedField('Prep · cracks ($)','settings.catalog.garage.prepAdj.cracks','number')}${lockedField('Prep · spalling ($)','settings.catalog.garage.prepAdj.spalling','number')}${lockedField('Prep · coating removal ($)','settings.catalog.garage.prepAdj.coatingRemoval','number')}${lockedField('Prep · patching ($)','settings.catalog.garage.prepAdj.patching','number')}${lockedField('Prep · leveling ($)','settings.catalog.garage.prepAdj.leveling','number')}${lockedField('Prep · moisture ($)','settings.catalog.garage.prepAdj.moisture','number')}</div>
   <h4 style="margin:16px 0 6px;font-size:13px">Flatwork (tables / countertops / bars) size bands</h4>
   ${(state.settings.catalog.flatwork.sizeBands||[]).map((b,i)=>`<div class="fields three">${lockedField(b.label+' · starting ($)','settings.catalog.flatwork.sizeBands.'+i+'.starting','number')}<div class="field"><label>Band id</label><input disabled value="${escape(b.id)}"></div><div class="field"><label>Max sq ft</label><input disabled value="${escape(b.maxSqft==null?'(open)':b.maxSqft)}"></div></div>`).join('')}
   <div class="fields">${lockedField('Largest flatwork item (sq ft)','settings.catalog.flatwork.maxItemSqft','number','Above this, measure and quote per sq ft on the floor flow, or set a custom starting price.')}</div>
-  <div class="fields three">${lockedField('Flatwork material · solid ($)','settings.catalog.flatwork.materialAdj.solid','number')}${lockedField('Flatwork material · flake ($)','settings.catalog.flatwork.materialAdj.flake','number')}${lockedField('Flatwork material · metallic ($)','settings.catalog.flatwork.materialAdj.metallic','number')}${lockedField('Flatwork topcoat · premium ($)','settings.catalog.flatwork.topcoatAdj.premium','number')}${lockedField('Flatwork condition · unknown ($)','settings.catalog.flatwork.conditionAdj.unknown','number')}${lockedField('Flatwork condition · fair ($)','settings.catalog.flatwork.conditionAdj.fair','number')}${lockedField('Flatwork condition · poor ($)','settings.catalog.flatwork.conditionAdj.poor','number')}${lockedField('Flatwork condition · critical ($)','settings.catalog.flatwork.conditionAdj.critical','number')}</div>
+  <div class="fields three">${lockedField('Flatwork material · solid ($)','settings.catalog.flatwork.materialAdj.solid','number')}${lockedField('Flatwork material · flake ($)','settings.catalog.flatwork.materialAdj.flake','number')}${lockedField('Flatwork material · metallic ($)','settings.catalog.flatwork.materialAdj.metallic','number')}${lockedField('Flatwork · Polyaspartic topcoat ($)','settings.catalog.flatwork.topcoatAdj.premium','number','Flat dollars for one table, bar, or countertop. Not a per-sq-ft rate.','min="0" step="1"')}${lockedField('Flatwork condition · unknown ($)','settings.catalog.flatwork.conditionAdj.unknown','number')}${lockedField('Flatwork condition · fair ($)','settings.catalog.flatwork.conditionAdj.fair','number')}${lockedField('Flatwork condition · poor ($)','settings.catalog.flatwork.conditionAdj.poor','number')}${lockedField('Flatwork condition · critical ($)','settings.catalog.flatwork.conditionAdj.critical','number')}</div>
   <h4 style="margin:16px 0 6px;font-size:13px">Seating (chairs / stools)</h4>
   <div class="fields three">${lockedField('Chair starting / item ($)','settings.catalog.seating.byType.chair','number')}${lockedField('Stool starting / item ($)','settings.catalog.seating.byType.stool','number')}${lockedField('Other seating / item ($)','settings.catalog.seating.byType.other','number')}</div>
-  <div class="fields three">${lockedField('Seating material · solid ($)','settings.catalog.seating.materialAdj.solid','number')}${lockedField('Seating material · flake ($)','settings.catalog.seating.materialAdj.flake','number')}${lockedField('Seating material · metallic ($)','settings.catalog.seating.materialAdj.metallic','number')}${lockedField('Seating topcoat · premium ($)','settings.catalog.seating.topcoatAdj.premium','number')}${lockedField('Seating condition · unknown ($)','settings.catalog.seating.conditionAdj.unknown','number')}${lockedField('Seating condition · fair ($)','settings.catalog.seating.conditionAdj.fair','number')}${lockedField('Seating condition · poor ($)','settings.catalog.seating.conditionAdj.poor','number')}${lockedField('Seating condition · critical ($)','settings.catalog.seating.conditionAdj.critical','number')}</div>
+  <div class="fields three">${lockedField('Seating material · solid ($)','settings.catalog.seating.materialAdj.solid','number')}${lockedField('Seating material · flake ($)','settings.catalog.seating.materialAdj.flake','number')}${lockedField('Seating material · metallic ($)','settings.catalog.seating.materialAdj.metallic','number')}${lockedField('Seating · Polyaspartic topcoat ($)','settings.catalog.seating.topcoatAdj.premium','number')}${lockedField('Seating condition · unknown ($)','settings.catalog.seating.conditionAdj.unknown','number')}${lockedField('Seating condition · fair ($)','settings.catalog.seating.conditionAdj.fair','number')}${lockedField('Seating condition · poor ($)','settings.catalog.seating.conditionAdj.poor','number')}${lockedField('Seating condition · critical ($)','settings.catalog.seating.conditionAdj.critical','number')}</div>
   <p class="method-note">Protective topcoat / good / sound / none adjustments default to <b>$0</b> (configured zero). All other catalog starts/adjustments default unconfigured (blank).</p>
   </div></details>
     <details open><summary>Approved adjustment limit (employee discount cap) ${owner?'':'🔒'}</summary><div class="detail-body">
@@ -1480,7 +1498,7 @@ function baselineSheetHTML(j,s,owner,print){
       ['3-car starting',cat.garage.threeCarStarting]
     ]));
     serviceBlocks+=`<h4 style="margin:12px 0 6px;font-size:13px">Material adjustments</h4>`+tableHTML(['Adjustment','Baseline'],baselineAdjRows(cat.garage.materialAdj,{solid:'Solid',flake:'Flake',metallic:'Metallic',sealer:'Sealer',custom:'Custom'}));
-    serviceBlocks+=`<h4 style="margin:12px 0 6px;font-size:13px">Topcoat adjustments</h4>`+tableHTML(['Adjustment','Baseline'],baselineAdjRows(cat.garage.topcoatAdj,{protective:'Protective',none:'None',premium:'Premium'}));
+    serviceBlocks+=`<h4 style="margin:12px 0 6px;font-size:13px">Topcoat adjustments</h4>`+tableHTML(['Adjustment','Baseline'],baselineAdjRows(cat.garage.topcoatAdj,{protective:'Protective',none:'None',premium:'Polyaspartic topcoat'}));
     serviceBlocks+=`<h4 style="margin:12px 0 6px;font-size:13px">Condition adjustments</h4>`+tableHTML(['Adjustment','Baseline'],baselineAdjRows(cat.garage.conditionAdj,{unknown:'Unknown',good:'Good',sound:'Sound',fair:'Fair',poor:'Poor',critical:'Critical',paint:'Paint / coating',adhesive:'Adhesive'}));
     serviceBlocks+=`<h4 style="margin:12px 0 6px;font-size:13px">Prep adjustments</h4>`+tableHTML(['Adjustment','Baseline'],baselineAdjRows(cat.garage.prepAdj,{cracks:'Cracks / joints',spalling:'Spalling',coatingRemoval:'Coating removal',patching:'Patching',leveling:'Leveling',moisture:'Moisture-control primer'}));
     if(!E.garageUsesMeasured(j)){
@@ -1493,7 +1511,7 @@ function baselineSheetHTML(j,s,owner,print){
     bandRows.push(`<tr><td>Custom / override starting</td><td class="num">${E.isConfigured(cat.flatwork.customStarting)?fmtBaselineMoney(cat.flatwork.customStarting):'Optional — blank is not a missing price'}</td></tr>`);
     serviceBlocks+=`<h4 style="margin:12px 0 6px;font-size:13px">Size-band starting prices</h4>`+tableHTML(['Band','Baseline'],bandRows);
     serviceBlocks+=`<h4 style="margin:12px 0 6px;font-size:13px">Material adjustments</h4>`+tableHTML(['Adjustment','Baseline'],baselineAdjRows(cat.flatwork.materialAdj,{solid:'Solid',flake:'Flake',metallic:'Metallic',sealer:'Sealer',custom:'Custom'}));
-    serviceBlocks+=`<h4 style="margin:12px 0 6px;font-size:13px">Topcoat adjustments</h4>`+tableHTML(['Adjustment','Baseline'],baselineAdjRows(cat.flatwork.topcoatAdj,{protective:'Protective',none:'None',premium:'Premium'}));
+    serviceBlocks+=`<h4 style="margin:12px 0 6px;font-size:13px">Topcoat adjustments</h4>`+tableHTML(['Adjustment','Baseline'],baselineAdjRows(cat.flatwork.topcoatAdj,{protective:'Protective',none:'None',premium:'Polyaspartic topcoat'}));
     serviceBlocks+=`<h4 style="margin:12px 0 6px;font-size:13px">Condition adjustments</h4>`+tableHTML(['Adjustment','Baseline'],baselineAdjRows(cat.flatwork.conditionAdj,{unknown:'Unknown',good:'Good',fair:'Fair',poor:'Poor',critical:'Critical'}));
   } else if(type==='seating'){
     const by=cat.seating.byType||{};
@@ -1501,7 +1519,7 @@ function baselineSheetHTML(j,s,owner,print){
       ['Chair',by.chair],['Stool',by.stool],['Other seating',by.other]
     ]));
     serviceBlocks+=`<h4 style="margin:12px 0 6px;font-size:13px">Material adjustments</h4>`+tableHTML(['Adjustment','Baseline'],baselineAdjRows(cat.seating.materialAdj,{solid:'Solid',flake:'Flake',metallic:'Metallic',sealer:'Sealer',custom:'Custom'}));
-    serviceBlocks+=`<h4 style="margin:12px 0 6px;font-size:13px">Topcoat adjustments</h4>`+tableHTML(['Adjustment','Baseline'],baselineAdjRows(cat.seating.topcoatAdj,{protective:'Protective',none:'None',premium:'Premium'}));
+    serviceBlocks+=`<h4 style="margin:12px 0 6px;font-size:13px">Topcoat adjustments</h4>`+tableHTML(['Adjustment','Baseline'],baselineAdjRows(cat.seating.topcoatAdj,{protective:'Protective',none:'None',premium:'Polyaspartic topcoat'}));
     serviceBlocks+=`<h4 style="margin:12px 0 6px;font-size:13px">Condition adjustments</h4>`+tableHTML(['Adjustment','Baseline'],baselineAdjRows(cat.seating.conditionAdj,{unknown:'Unknown',good:'Good',fair:'Fair',poor:'Poor',critical:'Critical'}));
   }
   const productRows=Object.keys(products).map(k=>{
@@ -1569,7 +1587,8 @@ function internalContent(print=false){
       </ul>
     </section>`;
   }).join('');
-  const warnList=(x.warnings||[]).map(w=>`<li>${escape(w)}</li>`).join('')||'<li>No engine warnings right now.</li>';
+  const costWarning=/cost|profit|margin|markup|\/mi\b|per mile|mileage rate|pay rate|hourly|wage|overhead \$|supplier/i;
+  const warnList=(x.warnings||[]).filter(w=>owner||!costWarning.test(String(w))).map(w=>`<li>${escape(w)}</li>`).join('')||'<li>No engine warnings right now.</li>';
   const confirmList=[
     'Manufacturer product SKUs / system acceptance for selected finishes',
     'Exact color / flake blend sample approval before install',

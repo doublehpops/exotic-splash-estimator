@@ -37,6 +37,8 @@ check('small solid floor is per job and applies in every tier under 500 sq ft',(
     const mid=E.calculate(floor(450,'solid',tier),E.defaults);
     const raw=450*(tier==='opt1'?5:tier==='opt2'?6:7);
     assert.strictEqual(mid.total,Math.max(raw,2750),tier+' 450');
+    if(raw<2750)assert.strictEqual(mid.minimumLabel,'Small solid floor minimum');
+    else assert.strictEqual(mid.minimumLabel,'');
   }
   assert.strictEqual(E.calculate(floor(450,'solid','regular'),E.defaults).total,3150);
   assert.strictEqual(E.calculate(floor(499,'solid','opt1'),E.defaults).total,2750);
@@ -86,10 +88,13 @@ check('without the package table the flake base and solid credit still apply',()
   const x=E.calculate(j,s);
   assert.strictEqual(x.lines.find(l=>l.kind==='starting').total,3600);
   assert.strictEqual(x.lines.find(l=>/solid/.test(l.label)).total,-1350);
+  assert.strictEqual(x.minimumLabel,'Small solid floor minimum');
   assert.strictEqual(x.total,2750);
   const met=garage('2car','metallic','regular');
   const pending=E.calculate(met,s);
-  assert.strictEqual(pending.quoteReady,false);
+  assert.strictEqual(pending.quoteReady,true);
+  assert.strictEqual(pending.total,4500);
+  assert.ok((pending.unpricedLines||[]).some(r=>/metallic/i.test(r)));
 });
 
 check('coating, paint, adhesive, and poor slab use actual sq ft and their minimums',()=>{
@@ -204,8 +209,10 @@ check('an over-cap extra rate is not multiplied and the estimate lists the line'
   const j=floor(450,'flake');
   j.areas[0].prep={coatingRemoval:true};
   const x=E.calculate(j,s);
-  assert.strictEqual(x.quoteReady,false);
+  assert.strictEqual(x.quoteReady,true);
+  assert.strictEqual(x.total,4500);
   assert.ok(!x.lines.some(l=>l.label==='Coating removal'&&l.total===900*450));
+  assert.ok((x.unpricedLines||[]).some(r=>/Coating removal/.test(r)));
   const shown=floor(1000,'flake');
   shown.areas[0].prep={coatingRemoval:true};
   const snap=Q.customerSnapshot(E,shown,E.calculate(shown,E.defaults),E.defaults);
