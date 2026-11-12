@@ -290,6 +290,9 @@ async function handleQuoteRequest(body,deps,E){
     delete jobData.discountApproval;
     jobData.discount=0;
     const pb=await deps.getPriceBook();
+    if(body.priceBookVersion!=null&&body.priceBookVersion!==''&&Number(body.priceBookVersion)!==Number(pb.version)){
+      return{status:409,body:{ok:false,code:'price_book_version_mismatch',error:'Price book version mismatch',priceBookVersion:pb.version}};
+    }
     const markup=stored?await deps.getJobMarkup(stored.id):null;
     let {settings,job,x}=computeQuote(E,{jobData,staffSettings:pb.staff_settings,ownerSettings:pb.owner_settings,markupPct:markup});
     const DA=discountApi();

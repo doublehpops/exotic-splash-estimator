@@ -74,6 +74,7 @@ function create(client,opts){
         let detail=null;try{detail=r.error.context&&typeof r.error.context.json==='function'?await r.error.context.json():null}catch{}
         if(detail&&detail.code==='discount_over_cap')throw new CloudError('discount_over_cap','Discount exceeds the owner-approved adjustment limit.');
         if(detail&&detail.code==='forbidden')throw new CloudError('forbidden','Account is not active staff.');
+        if(detail&&detail.code==='price_book_version_mismatch')throw new CloudError('price_book_version_mismatch','Price book version mismatch.',detail);
         if(detail&&detail.code==='conflict')throw new CloudError('conflict','Job or price book changed — retry.');
         throw friendly(detail&&detail.error?{message:detail.error}:r.error);
       }
@@ -116,5 +117,15 @@ function shareUrl(base,token){
   const u=String(base||'').replace(/[#?].*$/,'').replace(/[^/]*$/,'')+'estimate.html';
   return u+'#t='+encodeURIComponent(token);
 }
-return{create,CloudError,friendly,shareUrl,JOB_COLS,PHOTO_BUCKET};
+/** One reload and one re-price when quote-job reports a stale price book. A second mismatch is returned to the caller. */
+async function quoteWithPriceBookReload(quote,reload){
+  try{
+    return await quote();
+  }catch(err){
+    if(!err||err.code!=='price_book_version_mismatch')throw err;
+    await reload();
+    return await quote();
+  }
+}
+return{create,CloudError,friendly,shareUrl,quoteWithPriceBookReload,JOB_COLS,PHOTO_BUCKET};
 });

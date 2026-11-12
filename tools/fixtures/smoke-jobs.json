@@ -1,0 +1,11 @@
+{
+  "note": "Selling totals only. No owner costs, margins, or secrets.",
+  "jobs": [
+    {"id": "floor-450-flake-regular", "projectType": "floor", "sqft": 450, "style": "flake", "priceOption": "regular", "total": 4500},
+    {"id": "floor-100-solid-regular", "projectType": "floor", "sqft": 100, "style": "solid", "priceOption": "regular", "total": 2000},
+    {"id": "floor-1200-metallic-opt1", "projectType": "floor", "sqft": 1200, "style": "metallic", "priceOption": "opt1", "total": 13200},
+    {"id": "garage-2car-flake", "projectType": "garage", "garagePackage": "2car", "style": "flake", "total": 4500},
+    {"id": "garage-2car-solid", "projectType": "garage", "garagePackage": "2car", "style": "solid", "total": 3150},
+    {"id": "garage-1car-solid-opt1", "projectType": "garage", "garagePackage": "1car", "style": "solid", "priceOption": "opt1", "total": 2000}
+  ]
+}
