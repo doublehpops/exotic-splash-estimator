@@ -754,6 +754,12 @@ function projectTypePickerHTML(j){
   ];
   return `<div class="project-type-grid">${types.map(([id,label,help])=>`<button type="button" class="project-type-card ${j.projectType===id?'active':''}" data-project-type="${id}" aria-pressed="${j.projectType===id}"><span class="opt-name">${escape(label)}</span><span class="opt-meta">${escape(help)}</span></button>`).join('')}</div>`;
 }
+function multiColorFieldsHTML(j){
+  const style=j.garageStyle||'';
+  if(style==='metallic')return `<div class="fields">${select('Metallic colors','job.garageMetallicColors',[[1,'1 color — included'],[2,'2 colors — included'],[3,'3 colors'],[4,'4 colors']],'1 or 2 colors are in the package price. 3 or 4 add the Price book rate per sq ft, including overflow. 5 is not allowed.')}</div>`;
+  if(style==='flake')return `<div class="fields">${select('Flake blend','job.garageFlakeBlend',[['stock','Stock blend — included'],['custom','Custom blend']])}${j.garageFlakeBlend==='custom'?select('Colors in the custom blend','job.garageFlakeColors',[[1,'1'],[2,'2'],[3,'3'],[4,'4']],'Up to 4 colors. A custom blend adds the Price book rate per sq ft, including overflow.'):''}</div>`;
+  return '';
+}
 function optionalExtrasHTML(j,base){
   const ex=j.extras||{};
   const root=base+'.extras';
@@ -805,6 +811,7 @@ function garagePackageHTML(j){
         ${select('Topcoat','job.garageTopcoat',[['protective','Protective (standard)'],['none','None noted'],['premium','Polyaspartic topcoat']])}
         ${select('Concrete condition','job.garageCondition',[['unknown','Unknown / not inspected'],['good','Good'],['fair','Fair'],['poor','Poor'],['critical','Critical'],['sound','Sound / bare'],['paint','Paint / coating present'],['adhesive','Adhesive residue']])}
       </div>
+      ${multiColorFieldsHTML(j)}
       <p class="hint">Spalling means the concrete surface is flaking or crumbling.</p>
       <div class="checklist">${[['cracks','Cracks / joints'],['spalling','Poor slab / spalling'],['coatingRemoval','Coating removal'],['paintRemoval','Paint removal'],['patching','Patching'],['leveling','Leveling'],['moisture','Moisture barrier']].map(([k,l])=>{
         const on=!!(j.garagePrep&&j.garagePrep[k]);
@@ -834,6 +841,8 @@ function flatworkItemsHTML(j){
         ${select('Size band',base+'.sizeBand',[['',('Auto from sq ft')]].concat(bands.map(b=>[b.id,b.label+(E.isConfigured(b.starting)?' · '+cash(Number(b.starting)):' · Starting price needed')])))}
 
         ${select('Material / system',base+'.style',[['solid','Solid'],['flake','Flake'],['metallic','Metallic'],['sealer','Clear seal'],['custom','Custom']])}
+        ${it.style==='metallic'?select('Metallic colors',base+'.metallicColors',[[1,'1 color — included'],[2,'2 colors — included'],[3,'3 colors'],[4,'4 colors']],'3 or 4 colors add the Price book rate on this item’s sq ft. 5 is not allowed.'):''}
+        ${it.style==='flake'?select('Flake blend',base+'.flakeBlend',[['stock','Stock blend — included'],['custom','Custom blend']])+(it.flakeBlend==='custom'?select('Colors in the custom blend',base+'.flakeColors',[[1,'1'],[2,'2'],[3,'3'],[4,'4']],'Up to 4. A custom blend adds the Price book rate per sq ft.'):''):''}
         ${select('Topcoat',base+'.topcoat',[['protective','Protective'],['none','None'],['premium','Polyaspartic topcoat']])}
         ${select('Condition',base+'.condition',[['unknown','Unknown / not inspected'],['good','Good'],['fair','Fair'],['poor','Poor'],['critical','Critical']])}
         ${field('Item starting price override ($)',base+'.customStarting','number','Optional. Blank keeps the size-band price. A blank override is not a missing package price.','step="any"')}
@@ -1004,6 +1013,7 @@ function colorPaletteHTML(a,i){
     <p class="method-note">On-screen colors are <b>approximate</b>. Confirm physical samples and manufacturer availability before ordering. Compatibility with text field: selection writes into Floor color.</p>
     <div class="color-palette" role="listbox">${swatches}</div>
     ${a.colorKey==='custom'?field('Custom color description',base+'.customColor','text','Type the requested color / code — availability TBD'):field('Color name (editable)',base+'.color','text','Kept in sync with palette; edit for notes')}
+    ${a.style==='metallic'?select('Metallic colors',base+'.metallicColors',[[1,'1 color — included'],[2,'2 colors — included'],[3,'3 colors'],[4,'4 colors']],'1 or 2 colors are in the base price. 3 or 4 add the Price book rate per sq ft. 5 is not allowed.'):''}
   </div>`;
 }
 function flakePaletteHTML(a,i){
@@ -1016,7 +1026,7 @@ function flakePaletteHTML(a,i){
   return `<div class="palette-block"><span class="eyebrow">FLAKE COLOR / BLEND</span>
     <p class="method-note">Common neutral blends for planning. Does <b>not</b> claim manufacturer stock or exact match — confirm samples.</p>
     <div class="color-palette" role="listbox">${swatches}</div>
-    ${a.flakeBlend==='custom'?field('Custom flake blend description',base+'.customFlakeBlend','text','Describe desired blend — availability TBD'):''}
+    ${a.flakeBlend==='custom'?field('Custom flake blend description',base+'.customFlakeBlend','text','Describe desired blend — availability TBD')+select('Colors in the custom blend',base+'.flakeColors',[[1,'1'],[2,'2'],[3,'3'],[4,'4']],'Up to 4 colors. A custom blend adds the Price book rate per sq ft. A stock blend is included.'):'<p class="method-note">A stock blend is included. Choose Custom blend to add colors. The add-on is per sq ft, not a discount.</p>'}
   </div>`;
 }
 function stepSelections(j){
@@ -1026,7 +1036,7 @@ function stepSelections(j){
     ${priceNeededBanner(x)}
     <div class="notice">Material/system and topcoat selections on catalog items <b>must change price</b> via configured adjustments — not description-only. Configure adjustments under Costs &amp; pricing → Catalog packages. Color palettes for measured floors remain on floor jobs.</div>
     <p class="method-note">Garage package: style <b>${escape(j.garageStyle||'—')}</b> · topcoat <b>${escape(j.garageTopcoat==='premium'?'Polyaspartic topcoat':(j.garageTopcoat||'—'))}</b> · condition <b>${escape(j.garageCondition||'unknown')}</b>.</p>
-    ${(j.projectType==='garage'&&!E.garageUsesMeasured(j))?`<div class="area-options">${checkbox('Slip-resistant texture','job.extras.antiSlip')}</div><p class="method-note">Same option as a measured floor. It uses the Price book anti-slip rate on the package size, plus any overflow sq ft, as its own line.</p>`:''}
+    ${(j.projectType==='garage'&&!E.garageUsesMeasured(j))?`<div class="area-options">${checkbox('Slip-resistant texture','job.extras.antiSlip')}</div><p class="method-note">Same option as a measured floor. It uses the Price book anti-slip rate on the package size, plus any overflow sq ft, as its own line.</p>${multiColorFieldsHTML(j)}`:''}
     ${(j.catalogItems||[]).map((it,i)=>`<p class="method-note">Item ${i+1}: <b>${escape(it.name||'Item')}</b> · ${escape(it.style||'solid')} · topcoat ${escape(it.topcoat==='premium'?'Polyaspartic topcoat':(it.topcoat||'protective'))} · condition ${escape(it.condition||'unknown')}</p>`).join('')}
     </section>`;
   }
@@ -1379,6 +1389,8 @@ function ratesView(){
     ${lockedField('Countertop metallic ($/sq ft)','settings.extras.countertop.metallic','number')}
     ${lockedField('Countertop minimum ($)','settings.extras.countertop.min','number')}
     ${lockedField('Anti-slip ($/sq ft)','settings.extras.antiSlip.perSqft','number')}
+    ${lockedField('Metallic 3–4 colors ($/sq ft)','settings.extras.multiColor.metallicPerSqft','number','Added on metallic floors, garage packages, and countertops when 3 or 4 colors are chosen. 1 or 2 are included.','min="0" max="40" step="0.01"')}
+    ${lockedField('Custom flake blend ($/sq ft)','settings.extras.multiColor.customFlakePerSqft','number','Added when a flake job uses a custom blend. A stock blend is included. Up to 4 colors.','min="0" max="40" step="0.01"')}
     ${lockedField('Travel past 25 miles ($/mile)','settings.extras.travelBeyond.perMile','number')}
     ${lockedField('Moving ($/hour)','settings.extras.moving.perHour','number')}
     ${lockedField('Rush (%)','settings.extras.rush.pct','number')}

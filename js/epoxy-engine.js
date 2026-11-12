@@ -70,6 +70,7 @@ const defaults={business:{name:'Exotic Splash Epoxy LLC',address:'211 W. Wacker 
   stemWall:{perLf:9},
   countertop:{solid:45,metallic:65,min:900},
   antiSlip:{perSqft:0.35},
+  multiColor:{metallicPerSqft:1.5,customFlakePerSqft:1},
   travelBeyond:{includedMiles:25,perMile:2.5},
   moving:{perHour:150},
   rush:{withinDays:7,pct:10},
@@ -88,7 +89,7 @@ const newJob=()=>({number:'ES-'+date().replaceAll('-','')+'-01',date:date(),cust
   /* v6 catalog */
   projectType:'floor', /* floor | garage | flatwork | seating */
   garagePackage:'measured', /* 1car | 2car | 3car | measured — >3-car MUST be measured */
-  garageStyle:'flake',garageTopcoat:'protective',garageCondition:'unknown',garagePrep:{cracks:false,crackLf:0,spalling:false,coatingRemoval:false,paintRemoval:false,patching:false,leveling:false,moisture:false},
+  garageStyle:'flake',garageTopcoat:'protective',garageMetallicColors:1,garageFlakeBlend:'stock',garageCondition:'unknown',garagePrep:{cracks:false,crackLf:0,spalling:false,coatingRemoval:false,paintRemoval:false,patching:false,leveling:false,moisture:false},
   extras:{crackLf:0,coatingRemoval:false,paintRemoval:false,adhesiveRemoval:false,poorSlab:false,stairsSolid:0,stairsFlake:0,stemWallLf:0,countertopSqft:0,countertopStyle:'solid',travel:false,movingHours:0,rush:false,weekend:false,winterHeatDays:0,consumables:false,fuel:false,extraVisits:0,warrantyYears:1},
   catalogItems:[],
   quoteFinalizeBlocked:false
@@ -261,6 +262,53 @@ function addPolyLine(lines,unpriced,sqft,rawRate){
 }
 function topcoatAdjLabel(key){
   return key==='premium'?'Polyaspartic topcoat':'Topcoat ('+(key||'protective')+')';
+}
+/* 1–4 only. Five or more is capped at 4. Blank counts as one included color. */
+function colorCount(v){
+  const x=Math.round(Number(v));
+  if(!Number.isFinite(x)||x<=1)return 1;
+  return x>4?4:x;
+}
+function pushRateLine(rows,unpriced,label,sqft,rawRate){
+  const sf=n(sqft);
+  if(!(sf>0))return;
+  if(!isConfigured(rawRate)){
+    unpriced.push(priceNotSet(label));
+    return;
+  }
+  const rate=Number(rawRate);
+  if(!(rate>0))return;
+  const total=r2(sf*rate);
+  if(!(total>0))return;
+  rows.push({kind:'extra',label,description:'$'+rate.toFixed(2)+' / sq ft',qty:sf,unit:'sq ft',rate,total});
+}
+/* Metallic 3–4 colors and a custom flake blend add on top. Solid has no multi-color charge. */
+function collectColorCharges(job,settings,rows,unpriced){
+  const cfg=extrasConfig(settings).multiColor||{};
+  let metalSf=0,flakeSf=0;
+  const type=projectTypeOf(job);
+  if(type==='garage'&&!garageUsesMeasured(job)){
+    const sf=packageBillableSqft(job,settings);
+    if((job.garageStyle||'')==='metallic'&&colorCount(job.garageMetallicColors)>=3)metalSf+=sf;
+    if((job.garageStyle||'')==='flake'&&job.garageFlakeBlend==='custom')flakeSf+=sf;
+  }else if(type==='floor'||(type==='garage'&&garageUsesMeasured(job))){
+    for(const a of job.areas||[]){
+      const sf=n(a.sqft);
+      if(!(sf>0)||a.style==='level')continue;
+      if(a.style==='metallic'&&colorCount(a.metallicColors)>=3)metalSf+=sf;
+      if(a.style==='flake'&&a.flakeBlend==='custom')flakeSf+=sf;
+    }
+  }else if(type==='flatwork'){
+    for(const it of job.catalogItems||[]){
+      let sf=n(it.sqft);
+      if(!(sf>0))sf=r2(n(it.length)*n(it.width));
+      if(!(sf>0))continue;
+      if(it.style==='metallic'&&colorCount(it.metallicColors)>=3)metalSf+=sf;
+      if(it.style==='flake'&&it.flakeBlend==='custom')flakeSf+=sf;
+    }
+  }
+  if(metalSf>0)pushRateLine(rows,unpriced,'Metallic extra colors',metalSf,cfg.metallicPerSqft);
+  if(flakeSf>0)pushRateLine(rows,unpriced,'Custom flake blend',flakeSf,cfg.customFlakePerSqft);
 }
 function blankExtras(){
   return {crackLf:0,coatingRemoval:false,paintRemoval:false,adhesiveRemoval:false,poorSlab:false,stairsSolid:0,stairsFlake:0,stemWallLf:0,countertopSqft:0,countertopStyle:'solid',antiSlip:false,travel:false,movingHours:0,rush:false,weekend:false,winterHeatDays:0,consumables:false,fuel:false,extraVisits:0,warrantyYears:1};
@@ -582,6 +630,7 @@ function collectOptionalExtras(job,settings){
     if(total>0)rows.push({kind:'extra',label:'Fuel and vehicle wear',description:'$' + rate.toFixed(2)+' per mile',qty:miles,unit:'mile',rate,total});
   }
   if(n(ex.extraVisits)>0)rows.push({kind:'extra',label:'Extra site visit',description:'$' + n(cfg.extraVisit.flat).toFixed(2)+' each',qty:n(ex.extraVisits),unit:'visit',rate:n(cfg.extraVisit.flat),total:r2(n(ex.extraVisits)*n(cfg.extraVisit.flat))});
+  collectColorCharges(job,settings,rows,unpriced);
   const kept=rows.filter(row=>n(row.total)>0);
   kept.unpriced=unpriced;
   return kept;

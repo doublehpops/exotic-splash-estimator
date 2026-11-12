@@ -96,9 +96,12 @@ function collectBook(settings){
     if(!hit)continue;
     (hit.level==='block'?blocks:warnings).push(hit);
   }
+  const multi=settings&&settings.extras&&settings.extras.multiColor;
   const polyRates=[
     [settings&&settings.catalog&&settings.catalog.garage&&settings.catalog.garage.topcoatAdj&&settings.catalog.garage.topcoatAdj.premium,'Polyaspartic topcoat / sq ft'],
-    [settings&&settings.catalog&&settings.catalog.flatwork&&settings.catalog.flatwork.topcoatAdj&&settings.catalog.flatwork.topcoatAdj.premium,'Flatwork polyaspartic topcoat / sq ft']
+    [settings&&settings.catalog&&settings.catalog.flatwork&&settings.catalog.flatwork.topcoatAdj&&settings.catalog.flatwork.topcoatAdj.premium,'Flatwork polyaspartic topcoat / sq ft'],
+    [multi&&multi.metallicPerSqft,'Metallic 3–4 colors / sq ft'],
+    [multi&&multi.customFlakePerSqft,'Custom flake blend / sq ft']
   ];
   for(const [raw,label] of polyRates){
     const hit=perSqftIssue(label,raw);
@@ -146,6 +149,12 @@ function guardSettings(settings){
   if(next.catalog&&next.catalog.flatwork&&next.catalog.flatwork.topcoatAdj){
     const hit=perSqftIssue('Flatwork polyaspartic topcoat / sq ft',next.catalog.flatwork.topcoatAdj.premium);
     if(hit&&hit.level==='block')next.catalog.flatwork.topcoatAdj.premium=null;
+  }
+  if(next.extras&&next.extras.multiColor){
+    const metal=perSqftIssue('Metallic 3–4 colors / sq ft',next.extras.multiColor.metallicPerSqft);
+    const flake=perSqftIssue('Custom flake blend / sq ft',next.extras.multiColor.customFlakePerSqft);
+    if(metal&&metal.level==='block')next.extras.multiColor.metallicPerSqft=null;
+    if(flake&&flake.level==='block')next.extras.multiColor.customFlakePerSqft=null;
   }
   next.addOn=next.addOn||{};
   for(const key of ['low','high']){
