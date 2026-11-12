@@ -60,7 +60,7 @@ const garagePackageDefaults={packages:{
   opt2:{solid:{oneCar:2850,twoCar:3800,threeCar:4800},flake:{oneCar:3500,twoCar:4950,threeCar:6450},metallic:{oneCar:4150,twoCar:6150,threeCar:8100}},
   regular:{solid:{oneCar:3300,twoCar:4450,threeCar:5600},flake:{oneCar:3900,twoCar:5500,threeCar:7200},metallic:{oneCar:4750,twoCar:7100,threeCar:9350}}
 }};
-const defaults={business:{name:'Exotic Splash Epoxy LLC',address:'211 W. Wacker Drive, Ste 120, Chicago, IL 60606',phone:'331-315-5738',email:'',crews:[]},products:{primer:{label:'Epoxy primer',size:3,price:210,coverage:250,unit:'gal'},base:{label:'Colored epoxy',size:3,price:210,coverage:150,unit:'gal'},white:{label:'White epoxy',size:3,price:225,coverage:150,unit:'gal'},metal:{label:'Metallic clear epoxy',size:3,price:270,coverage:40,unit:'gal'},pigment:{label:'Metallic pigment',size:1,price:35,coverage:200,unit:'pack'},sealer:{label:'Clear base sealer',size:1,price:80,coverage:200,unit:'gal'},top:{label:'Protective topcoat',size:1,price:120,coverage:220,unit:'gal'},flake:{label:'Decorative flakes (40 lb box)',size:40,price:108,coverage:0,unit:'lb'},level:{label:'Self-leveling cement, 50 lb',size:1,price:75,coverage:25,unit:'bag'},levelPrimer:{label:'Self-leveling primer',size:1,price:50,coverage:120,unit:'gal'},patch:{label:'Concrete patch kit',size:1,price:75,coverage:0,unit:'kit'},grip:{label:'Traction additive',size:1,price:65,coverage:1200,unit:'pack'},moisture:{label:'Moisture-control primer',size:3,price:330,coverage:100,unit:'gal'}},rates:{solid:7,flake:10,metallic:15,sealer:3,level:6,removal:2,patch:150,moisture:4,extraCoat:1.5,mediumFlakeExtra:0.5,fullFlakeExtra:1,minimumJob:2000,minimumFloorsDiscount:false,smallSolidFloor:{maxSqft:500,min:2750}},costs:{waste:10,labor:42.5,prepProduction:60,coatProduction:120,levelProduction:40,removalProduction:40,patchHours:1,setupHours:13,rentalDay:250,tooling:250,supplies:280,dust:100,disposal:150,mile:0.85,overhead:0,contingency:5,purchaseTax:10.5,markup:42.86,targetMargin:30,minMargin:25,minimum:0,grindProduction:75,baseProduction:200,flakeProduction:250,topProduction:200,metallicProduction:100,primerPass:false,materialPerSqft:{solid:1.26,flake:2.25,metallic:2.72},billableHoursPerMonth:448,allowancesInOverhead:true,overheadLines:OVERHEAD_LINES.map(x=>({...x}))},notes:'Our quoted price covers the scope described. If you receive a lower written estimate for comparable work, materials, preparation, and finish, share it with us. Where feasible, we will try to match the price or beat it by $1,000, subject to our review and written confirmation. The quoted total remains in effect until a revised written estimate is issued.',pricingOptions:{opt1:{label:'Option 1 — Bank transfer',short:'Option 1 · Bank transfer',payMethod:'bank transfer',rates:{solid:5,flake:8,metallic:11},schedule:[{pct:50,label:'Booking'},{pct:50,label:'Final walkthrough'}]},opt2:{label:'Option 2 — Scheduled payments',short:'Option 2 · 50 / 25 / 25',payMethod:'scheduled',rates:{solid:6,flake:9,metallic:13},schedule:[{pct:50,label:'Booking'},{pct:25,label:'Upon project completion'},{pct:25,label:'Within 14 days'}]}},discountApproval:{enforce:true},addOn:{label:'Standard property / trip add-in',low:0,high:0,enabled:false},approvedAdjustment:{mode:'amount',amount:0,pct:0},catalog:catalogDefaults,garage:garagePackageDefaults,extras:{
+const defaults={business:{name:'Exotic Splash Epoxy LLC',address:'211 W. Wacker Drive, Ste 120, Chicago, IL 60606',phone:'331-315-5738',email:'',crews:[]},products:{primer:{label:'Epoxy primer',size:3,price:210,coverage:250,unit:'gal'},base:{label:'Colored epoxy',size:3,price:210,coverage:150,unit:'gal'},white:{label:'White epoxy',size:3,price:225,coverage:150,unit:'gal'},metal:{label:'Metallic clear epoxy',size:3,price:270,coverage:40,unit:'gal'},pigment:{label:'Metallic pigment',size:1,price:35,coverage:200,unit:'pack'},sealer:{label:'Clear base sealer',size:1,price:80,coverage:200,unit:'gal'},top:{label:'Protective topcoat',size:1,price:120,coverage:220,unit:'gal'},flake:{label:'Decorative flakes (40 lb box)',size:40,price:108,coverage:0,unit:'lb'},level:{label:'Self-leveling cement, 50 lb',size:1,price:75,coverage:25,unit:'bag'},levelPrimer:{label:'Self-leveling primer',size:1,price:50,coverage:120,unit:'gal'},patch:{label:'Concrete patch kit',size:1,price:75,coverage:0,unit:'kit'},grip:{label:'Traction additive',size:1,price:65,coverage:1200,unit:'pack'},moisture:{label:'Moisture-control primer',size:3,price:330,coverage:100,unit:'gal'}},rates:{solid:7,flake:10,metallic:15,sealer:3,level:6,removal:2,patch:150,moisture:4,extraCoat:1.5,mediumFlakeExtra:0.5,fullFlakeExtra:1,minimumJob:2000,minimumFloorsDiscount:false,smallSolidFloor:{maxSqft:400,min:2750,bands:[{minSqft:400,maxSqft:500,source:'package',system:'solid',size:'2'}]}},costs:{waste:10,labor:42.5,prepProduction:60,coatProduction:120,levelProduction:40,removalProduction:40,patchHours:1,setupHours:13,rentalDay:250,tooling:250,supplies:280,dust:100,disposal:150,mile:0.85,overhead:0,contingency:5,purchaseTax:10.5,markup:42.86,targetMargin:30,minMargin:25,minimum:0,grindProduction:75,baseProduction:200,flakeProduction:250,topProduction:200,metallicProduction:100,primerPass:false,materialPerSqft:{solid:1.26,flake:2.25,metallic:2.72},billableHoursPerMonth:448,allowancesInOverhead:true,overheadLines:OVERHEAD_LINES.map(x=>({...x}))},notes:'Our quoted price covers the scope described. If you receive a lower written estimate for comparable work, materials, preparation, and finish, share it with us. Where feasible, we will try to match the price or beat it by $1,000, subject to our review and written confirmation. The quoted total remains in effect until a revised written estimate is issued.',pricingOptions:{opt1:{label:'Option 1 — Bank transfer',short:'Option 1 · Bank transfer',payMethod:'bank transfer',rates:{solid:5,flake:8,metallic:11},schedule:[{pct:50,label:'Booking'},{pct:50,label:'Final walkthrough'}]},opt2:{label:'Option 2 — Scheduled payments',short:'Option 2 · 50 / 25 / 25',payMethod:'scheduled',rates:{solid:6,flake:9,metallic:13},schedule:[{pct:50,label:'Booking'},{pct:25,label:'Upon project completion'},{pct:25,label:'Within 14 days'}]}},discountApproval:{enforce:true},addOn:{label:'Standard property / trip add-in',low:0,high:0,enabled:false},approvedAdjustment:{mode:'amount',amount:0,pct:0},catalog:catalogDefaults,garage:garagePackageDefaults,extras:{
   crackRepair:{flat:250,includedLf:10,perLf:12},
   coatingRemoval:{perSqft:1.5,min:650},
   paintRemoval:{perSqft:1.25,min:250},
@@ -179,7 +179,7 @@ function packageTablePrice(settings,job,pkgKey){
   const style=job&&job.garageStyle?job.garageStyle:'flake';
   const sys=tierTable[style];
   if(!sys||typeof sys!=='object')return null;
-  const aliases={oneCar:['oneCar','1car'],twoCar:['twoCar','2car'],threeCar:['threeCar','3car']};
+  const aliases={oneCar:['oneCar','1car','1'],twoCar:['twoCar','2car','2'],threeCar:['threeCar','3car','3']};
   const keys=aliases[pkgKey]||[pkgKey];
   for(const k of keys){
     if(Object.prototype.hasOwnProperty.call(sys,k)&&isConfigured(sys[k]))return Number(sys[k]);
@@ -263,7 +263,62 @@ function smallSolidSpec(settings){
   const d=defaults.rates.smallSolidFloor;
   const raw=settings&&settings.rates&&settings.rates.smallSolidFloor;
   const src=raw&&typeof raw==='object'&&!Array.isArray(raw)?raw:{};
-  return {maxSqft:cfgNum(src.maxSqft,d.maxSqft),min:cfgNum(src.min,d.min)};
+  /* A saved floor object with no bands keeps the single floor. Missing settings use the default band. */
+  const bands=Array.isArray(src.bands)?src.bands:(raw?[]:(Array.isArray(d.bands)?d.bands:[]));
+  return {maxSqft:cfgNum(src.maxSqft,d.maxSqft),min:cfgNum(src.min,d.min),bands};
+}
+function packageSizeKey(size){
+  const s=String(size==null?'2':size);
+  if(s==='1'||s==='1car'||s==='one'||s==='oneCar')return 'oneCar';
+  if(s==='3'||s==='3car'||s==='three'||s==='threeCar')return 'threeCar';
+  return 'twoCar';
+}
+/* Copy 1/2/3 size aliases onto oneCar/twoCar/threeCar when the canonical key is blank. */
+function normalizeStaffPackages(raw){
+  const packs=raw&&raw.garage&&raw.garage.packages;
+  if(!packs||typeof packs!=='object')return raw;
+  const alias={oneCar:['1car','1'],twoCar:['2car','2'],threeCar:['3car','3']};
+  for(const tier of Object.keys(packs)){
+    const systems=packs[tier];
+    if(!systems||typeof systems!=='object'||Array.isArray(systems))continue;
+    for(const sys of Object.keys(systems)){
+      const sizes=systems[sys];
+      if(!sizes||typeof sizes!=='object'||Array.isArray(sizes))continue;
+      for(const canon of Object.keys(alias)){
+        if(isConfigured(sizes[canon]))continue;
+        for(const key of alias[canon]){
+          if(!isConfigured(sizes[key]))continue;
+          sizes[canon]=Number(sizes[key]);
+          break;
+        }
+      }
+    }
+  }
+  return raw;
+}
+function packageCellAmount(settings,tier,system,sizeKey){
+  const priceTier=tier==='opt1'||tier==='opt2'||tier==='regular'?tier:'regular';
+  const listed=packageTablePrice(settings,{priceOption:priceTier,garageStyle:system},sizeKey);
+  if(listed!=null)return listed>0?listed:0;
+  const table=garagePackageDefaults.packages[priceTier]||garagePackageDefaults.packages.regular;
+  const cell=table&&table[system]&&table[system][sizeKey];
+  return isConfigured(cell)&&Number(cell)>0?Number(cell):0;
+}
+function bandAmount(settings,band,tier){
+  if(!band||typeof band!=='object')return 0;
+  if(isConfigured(band.min)&&Number(band.min)>0)return Number(band.min);
+  if(isConfigured(band.amount)&&Number(band.amount)>0)return Number(band.amount);
+  if(band.source&&band.source!=='package'&&band.source!=='garagePackage')return 0;
+  const system=band.system||'solid';
+  const sizeKey=packageSizeKey(band.size!=null?band.size:band.packageSize);
+  return packageCellAmount(settings,tier,system,sizeKey);
+}
+function inSqftBand(sf,band){
+  const lo=Number(band&&band.minSqft);
+  const hi=Number(band&&band.maxSqft);
+  if(!Number.isFinite(lo)||sf<lo)return false;
+  if(Number.isFinite(hi)&&sf>=hi)return false;
+  return true;
 }
 function packageTypicalSqft(job,settings){
   const key=garagePkgKey(job);
@@ -305,24 +360,61 @@ function solidSystemSqft(job,settings){
   }
   return 0;
 }
-function smallSolidFloorAmount(settings,job){
+/* Under the small ceiling: the flat small-solid minimum. A configured band owns its range and looks up that tier's package price when it has no amount. */
+function smallSolidFloorAmount(settings,job,tier){
   if(job&&job.method&&job.method!=='rates')return 0;
   const spec=smallSolidSpec(settings);
-  if(!(spec.maxSqft>0)||!(spec.min>0))return 0;
   const sf=solidSystemSqft(job,settings);
-  if(sf>0&&sf<spec.maxSqft)return spec.min;
+  if(!(sf>0))return 0;
+  const priceTier=tier||(job&&job.priceOption)||'regular';
+  let bandBest=0,bandMatched=false;
+  for(const band of spec.bands){
+    if(!inSqftBand(sf,band))continue;
+    bandMatched=true;
+    bandBest=Math.max(bandBest,bandAmount(settings,band,priceTier));
+  }
+  if(bandMatched&&bandBest>0)return bandBest;
+  if(spec.maxSqft>0&&spec.min>0&&sf<spec.maxSqft)return spec.min;
   return 0;
 }
-function bindingMinimum(settings,job,pre,active){
+function bindingMinimum(settings,job,pre,active,tier){
   if(!active)return {minimum:0,label:''};
   const jobMin=minimumJobAmount(settings);
-  const solidMin=smallSolidFloorAmount(settings,job);
+  const solidMin=smallSolidFloorAmount(settings,job,tier);
   const target=Math.max(jobMin,solidMin);
   const minimum=Math.max(0,target-pre);
   let label='';
   if(minimum>0.001&&solidMin>=jobMin&&solidMin>pre)label='Small solid floor minimum';
   else if(minimum>0.001)label='Minimum job charge';
   return {minimum:r2(minimum),label};
+}
+/* Package installs are costed as a floor of the same system. Sq ft is the package size, plus overflow above it. */
+function packageBillableSqft(job,settings){
+  const typical=packageTypicalSqft(job,settings);
+  const measured=sumAreaSqft(job);
+  if(!(typical>0))return measured;
+  return Math.max(typical,measured);
+}
+function floorSystemCost(settings,job,sqft,style){
+  const shadow=newJob();
+  shadow.customer=job.customer||'Package';
+  shadow.company=job.company||'';
+  shadow.projectType='floor';
+  shadow.method='rates';
+  shadow.priceOption='regular';
+  shadow.tax=0;
+  shadow.discount=0;
+  shadow.miles=n(job.miles);
+  shadow.minutes=n(job.minutes);
+  shadow.visits=job.visits;
+  shadow.vehicles=job.vehicles;
+  shadow.crew=job.crew;
+  shadow.rentalDays=job.rentalDays;
+  shadow.condition='sound';
+  shadow.patchKits=0;
+  shadow.extras=blankExtras();
+  shadow.areas=[{...newArea(),name:'Package area',sqft:sqft,style:style,coats:1,flake:'light',grip:false,level:false,moisture:false,rate:null}];
+  return calculate(shadow,settings);
 }
 function sqftCharge(cfg,sqft){
   const sf=n(sqft);
@@ -702,29 +794,30 @@ function calculateCatalog(job,settings){
   const br=buildCatalogBreakdown(job,settings);
   const warnings=[...br.pendingUnique,...(br.notesUnique||[])];
   if(!job.customer&&!job.company)warnings.push('Add a customer name before issuing the document.');
-  /* Travel/equipment still fold into overhead once when quote can price; do not invent scope $ */
+  /* Selling travel stays in the quote total. Garage package owner cost is applied after the selling price is set. */
   const hasScope=br.scopeTotal>0||br.quoteReady;
-  const travelCost=hasScope?(tr.mileage+tr.crewTravel):0;
-  const equipment=equipmentLines(job,c,hasScope);
-  const equip=equipment.reduce((s,x)=>s+x.total,0);
-  const overheadBase=hasScope?flatOverhead(c):0;
-  const overhead=overheadBase+travelCost+equip;
-  const overheadItems=hasScope?[
+  const sellingTravel=hasScope?(tr.mileage+tr.crewTravel):0;
+  let equipment=equipmentLines(job,c,hasScope);
+  let equip=equipment.reduce((s,x)=>s+x.total,0);
+  let overheadBase=hasScope?flatOverhead(c):0;
+  let travelCost=sellingTravel;
+  let overhead=overheadBase+travelCost+equip;
+  let overheadItems=hasScope?[
     {label:'Business overhead / job',qty:1,unit:'allowance',unitPrice:overheadBase,total:overheadBase},
     ...(tr.mileage?[{label:'Vehicle mileage (in overhead)',qty:tr.vehicleMiles,unit:'mile',unitPrice:tr.rate,total:tr.mileage}]:[]),
     ...(tr.crewTravel?[{label:'Crew travel time (in overhead)',qty:tr.crewHours,unit:'person-hr',unitPrice:n(c.labor),total:tr.crewTravel}]:[]),
     {label:'Equipment & job supplies (in overhead)',qty:1,unit:'allowance',unitPrice:equip,total:equip}
   ]:[];
-  /* Catalog jobs: no invented material/labor BOM — keep planning hours empty unless measured */
-  const material=[],mat=0,tax=0,hours=[],labor=0;
-  const direct=mat+tax+labor;
-  const contingency=(direct+overhead)*n(c.contingency)/100,cost=direct+overhead+contingency;
+  /* Flatwork and seating keep an empty material/labor bill. Garage packages are costed like a floor below. */
+  let material=[],mat=0,tax=0,hours=[],labor=0,personHours=0,costSqft=0;
+  let direct=mat+tax+labor;
+  let contingency=(direct+overhead)*n(c.contingency)/100,cost=direct+overhead+contingency;
 
   const optional=collectOptionalExtras(job,settings);
   const lines=[...br.lines,...optional];
   /* Property add-in is per-sq-ft floor economics — do not auto-apply to unmeasured catalog packages */
   const addOn={label:(settings.addOn||{}).label||'Standard property / trip add-in',tier:'low',rate:0,included:false,total:0};
-  const travelInQuote=travelCost;
+  const travelInQuote=sellingTravel;
   const lineSum=lines.reduce((s,x)=>s+sn(x.total),0);
   const discountable=br.startingTotal; /* adjustments stay; discount applies to starting scope similar to finish */
   const regularBase=lineSum+travelInQuote;
@@ -755,13 +848,32 @@ function calculateCatalog(job,settings){
     sel.paymentsReconcile=!sel.payments.length||Math.abs(r2(sel.payments.reduce((s,p)=>s+n(p.amount),0))-total)<0.02;
     choices[job.priceOption]=sel;
   }
+  if(br.type==='garage'){
+    const style=['solid','flake','metallic','sealer'].includes(job.garageStyle)?job.garageStyle:'';
+    const sf=packageBillableSqft(job,settings);
+    if(style&&sf>0){
+      const floor=floorSystemCost(settings,job,sf,style);
+      if(floor&&Number.isFinite(floor.cost)){
+        material=floor.material;mat=floor.mat;tax=floor.tax;hours=floor.hours;labor=floor.labor;
+        personHours=floor.personHours;equipment=floor.equipment;equip=floor.equip;
+        direct=floor.direct;overhead=floor.overhead;overheadBase=floor.overheadBase;
+        overheadItems=floor.overheadItems;contingency=floor.contingency;cost=floor.cost;
+        travelCost=floor.travelCost;costSqft=sf;
+      }
+    }
+  }
+  const materialCost=mat+tax;
+  const grossProfit=subtotal-labor-materialCost,grossMargin=subtotal?grossProfit/subtotal*100:0;
+  const operatingProfit=grossProfit-overheadBase,operatingMargin=subtotal?operatingProfit/subtotal*100:0;
   const profit=subtotal-cost,margin=subtotal?profit/subtotal*100:0;
+  if(costSqft&&subtotal>0&&(labor+materialCost)>0&&grossMargin<40)warnings.push('Gross margin is '+grossMargin.toFixed(1)+'%, under the 40% gross target. Review the job cost before selling this tier.');
+  if(costSqft&&subtotal>0&&(labor+materialCost)>0&&operatingMargin<15)warnings.push('Net margin is '+operatingMargin.toFixed(1)+'%, under the 15% net target after overhead. Review the job cost.');
   const sqft=br.measureSqft||0;
   const result={
     sqft,finished:sqft,levelArea:0,levelEquiv:0,material,mat,tax,hours,labor,equipment,equip,direct,overhead,overheadBase,overheadItems,contingency,cost,
     lines:displayLines,base:regularBase,regularBase,discountable,discountSqft:0,choices,selected:sel,addOn,travel:tr,travelCost,travelInQuote,crew:tr.crew,
-    discount:sel.discount,minimum,minimumLabel:bind.label,subtotal,salesTax,total,profit,margin,perSqft:sqft&&br.quoteReady?total/sqft:0,travelMiles:tr.vehicleMiles,
-    personHours:0,balance:Math.max(0,total-n(job.paid)),warnings,
+    discount:sel.discount,minimum,minimumLabel:bind.label,subtotal,salesTax,total,profit,margin,grossProfit,grossMargin,operatingProfit,operatingMargin,perSqft:sqft&&br.quoteReady?total/sqft:0,travelMiles:tr.vehicleMiles,
+    personHours,balance:Math.max(0,total-n(job.paid)),warnings,
     quoteReady:br.quoteReady,quoteStatus:br.quoteReady?'ready':'pending_prices',pendingReasons:br.pendingUnique,
     catalog:{
       type:br.type,startingTotal:br.startingTotal,adjTotal:br.adjTotal,scopeTotal:br.scopeTotal,
@@ -901,7 +1013,7 @@ function calculate(job,settings){
   else{project=discountable;rateShown=discountSqft?discountable/discountSqft:0;}
   const adjustment=project-discountable;
   const dollarPre=regularBase+adjustment;
-  const bind=bindingMinimum(settings,job,dollarPre,!!sqft);
+  const bind=bindingMinimum(settings,job,dollarPre,!!sqft,key);
   const minimum=bind.minimum;
   const pctLines=percentExtraLines(job,settings,dollarPre+minimum);
   const pctSum=r2(pctLines.reduce((s,x)=>s+n(x.total),0));
@@ -949,5 +1061,5 @@ function calculate(job,settings){
 function describe(a){const names={solid:'Solid-color epoxy',flake:'Decorative flake epoxy',metallic:'Metallic epoxy',sealer:'Clear sealer + protective topcoat',level:'Self-leveling preparation only'};let s=names[a.style]||names.solid;if(a.style!=='level'){const col=(a.colorKey==='custom'&&a.customColor)?a.customColor:(a.color||'color to be confirmed');s+='; '+col;}if(a.style==='solid')s+='; '+Math.max(1,n(a.coats))+' base coat(s)';if(a.style==='flake'){s+='; '+(a.flake==='full'?'full broadcast':a.flake==='medium'?'medium broadcast':'light spot flakes');const fb=(a.flakeBlend==='custom'&&a.customFlakeBlend)?a.customFlakeBlend:(a.flakeBlendLabel||a.flakeBlend||'');if(fb)s+=', flake blend: '+fb;}if(a.grip&&a.style!=='level')s+='; slip-resistant texture';if(a.style==='level'||a.level)s+='; leveling '+n(a.depth)+' inch average';if(a.moisture||(a.prep&&a.prep.moisture))s+='; moisture-control primer/barrier on this area';return s;}
 function areaHasMoisture(a){return !!(a&&(a.moisture||(a.prep&&a.prep.moisture)))}
 function moistureSqft(job){let s=0;for(const a of job.areas||[]){const sf=n(a.sqft);if(!sf)continue;if(a.style==='level')continue;if(areaHasMoisture(a))s+=sf}return s}
-const api={defaults,newArea,newJob,newFlatItem,newSeatItem,calculate,describe,n,sn,travelInfo,addOnInfo,crewSize,areaHasMoisture,moistureSqft,isConfigured,configuredAmount,projectTypeOf,garageUsesMeasured,garageStartingKey,flatworkBandForSqft,buildCatalogBreakdown,catalogDefaults,garagePackageDefaults,UNCONFIGURED,marginToMarkup,markupToMargin,overheadMonthlyTotal,overheadPerHourRate,overheadSpread,FIGURE_STATUS,OVERHEAD_LINES,minimumJobAmount,allowancesIncluded,blankExtras,packageTablePrice,smallSolidFloorAmount,solidSystemSqft};if(typeof module!=='undefined'&&module.exports)module.exports=api;root.EpoxyEngine=api;
+const api={defaults,newArea,newJob,newFlatItem,newSeatItem,calculate,describe,n,sn,travelInfo,addOnInfo,crewSize,areaHasMoisture,moistureSqft,isConfigured,configuredAmount,projectTypeOf,garageUsesMeasured,garageStartingKey,flatworkBandForSqft,buildCatalogBreakdown,catalogDefaults,garagePackageDefaults,UNCONFIGURED,marginToMarkup,markupToMargin,overheadMonthlyTotal,overheadPerHourRate,overheadSpread,FIGURE_STATUS,OVERHEAD_LINES,minimumJobAmount,allowancesIncluded,blankExtras,packageTablePrice,smallSolidFloorAmount,solidSystemSqft,normalizeStaffPackages};if(typeof module!=='undefined'&&module.exports)module.exports=api;root.EpoxyEngine=api;
 })(typeof window!=='undefined'?window:globalThis);

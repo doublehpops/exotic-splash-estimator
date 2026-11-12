@@ -252,7 +252,9 @@ function syncPrepIntoEngineFields(job){
 }
 function merge(target,source){for(const k of Object.keys(target)){if(source&&Object.prototype.hasOwnProperty.call(source,k)){if(target[k]&&typeof target[k]==='object'&&!Array.isArray(target[k])&&source[k]&&typeof source[k]==='object'&&!Array.isArray(source[k]))merge(target[k],source[k]);else target[k]=source[k]}}return target}
 function deepMergeSettings(stored){
-  const out=merge(clone(E.defaults),stored||{});
+  const src=clone(stored||{});
+  if(E.normalizeStaffPackages)E.normalizeStaffPackages(src);
+  const out=merge(clone(E.defaults),src);
   // Ensure catalog tree exists even when migrating older saves
   if(!out.catalog)out.catalog=clone(E.defaults.catalog);
   else {
@@ -580,6 +582,8 @@ function stripCosts(x){
   y.travel=Object.assign({},x.travel||{},{rate:0,mileage:0,crewTravel:0});
   y.material=(x.material||[]).map(m=>Object.assign({},m,{unitPrice:0,total:0}));
   y.equipment=(x.equipment||[]).map(m=>Object.assign({},m,{unitPrice:0,total:0}));
+  y.hours=(x.hours||[]).map(h=>({label:h.label,qty:E.n(h.qty)}));
+  y.overheadItems=[];
   y.lines=(x.lines||[]).filter(l=>!['mileage','travel','equipment','overhead','equip'].includes(l.kind||''));
   return y;
 }
@@ -794,7 +798,7 @@ function garagePackageHTML(j){
   };
   return `<div class="fields">${pkgs.map(([id,label])=>'').join('')}
     <div class="finish-picker" role="group">${pkgs.map(([id,label])=>`<button type="button" class="finish-choice ${j.garagePackage===id?'active':''}" data-garage-package="${id}" aria-pressed="${j.garagePackage===id}"><b>${escape(label)}</b><small style="display:block;margin-top:4px;font-size:10px;color:var(--muted)">${escape(startFor(id))}</small></button>`).join('')}</div>
-    ${j.garagePackage!=='measured'?`${(cat.disclaimer||'').trim()?`<div class="warn-banner"><b>Garage package baseline:</b> ${escape(cat.disclaimer.trim())}</div>`:''}<div class="notice">Package price comes from the tier, system, and size table (1-car 250 sq ft, 2-car 450 sq ft, 3-car 650 sq ft). Square feet above that size use that tier’s per-sq-ft rate for the chosen system. The solid credit is not subtracted when the table has a price. A solid package under 500 sq ft is at least $2,750 in every tier, so 1-car solid Option 1 is $2,750. The $2,000 job minimum still applies.</div>
+    ${j.garagePackage!=='measured'?`${(cat.disclaimer||'').trim()?`<div class="warn-banner"><b>Garage package baseline:</b> ${escape(cat.disclaimer.trim())}</div>`:''}<div class="notice">Package price comes from the tier, system, and size table (1-car 250 sq ft, 2-car 450 sq ft, 3-car 650 sq ft). Square feet above that size use that tier’s per-sq-ft rate for the chosen system. The solid credit is not subtracted when the table has a price. A solid package under 400 sq ft is at least $2,750, so 1-car solid Option 1 is $2,750. From 400 to 499 sq ft the quote shows one solid-floor minimum line. 500 sq ft and above are unchanged. The $2,000 job minimum still applies.</div>
       <div class="fields">${field('Measured sq ft','job.areas.0.sqft','number','Leave blank to price the typical size only. Square feet above 250 / 450 / 650 use the tier rate.','step="1"')}</div>
       <div class="fields three">
         ${select('Material / system','job.garageStyle',[['solid','Solid'],['flake','Flake'],['metallic','Metallic'],['sealer','Clear seal — use measured sq ft'],['custom','Custom — inspection / override']])}
@@ -1346,8 +1350,11 @@ function ratesView(){
   <details open><summary>Payment tiers & property add-in ${owner?'':'🔒'}</summary><div class="detail-body"><p>Regular is 7 / 10 / 15. Option 1 is bank transfer, 5 / 8 / 11, half at booking and half at the final walkthrough. Option 2 is 6 / 9 / 13, with 50%, 25%, and 25% within 14 days. Tiers do not stack and there is no extra 40% off. Prep and removal stay at their own prices. No material surcharge is added.</p>${['opt1','opt2'].map(k=>`<div class="fields three" style="margin-bottom:14px">${lockedField('Option label','settings.pricingOptions.'+k+'.label')}${lockedField('Solid / sq ft','settings.pricingOptions.'+k+'.rates.solid','number','$0–$40 per sq ft.','min="0" max="40" step="0.01" inputmode="decimal"')}${lockedField('Flake / sq ft','settings.pricingOptions.'+k+'.rates.flake','number','$0–$40 per sq ft.','min="0" max="40" step="0.01" inputmode="decimal"')}${lockedField('Metallic / sq ft','settings.pricingOptions.'+k+'.rates.metallic','number','$0–$40 per sq ft.','min="0" max="40" step="0.01" inputmode="decimal"')}${state.settings.pricingOptions[k].schedule.map((p,i)=>lockedField((p.label||('Payment '+(i+1)))+' %','settings.pricingOptions.'+k+'.schedule.'+i+'.pct','number')).join('')}</div>`).join('')}
   <p class="method-note">The property / trip add-in is folded into the base price. It is not a separate line. Defaults stay at $0.</p>
   ${lockedField('Minimum job charge ($)','settings.rates.minimumJob','number','Applied with the small-solid floor. The higher one wins. An owner-approved discount can go below it. Employees cannot.'+statusTag(E.FIGURE_STATUS.minimumJob),'min="0" step="1"')}
-  ${lockedField('Small solid floor — under (sq ft)','settings.rates.smallSolidFloor.maxSqft','number','A solid-system job whose solid sq ft is under this size uses the floor below, in every tier. Count is the job total, not each area.')}
-  ${lockedField('Small solid floor minimum ($)','settings.rates.smallSolidFloor.min','number','Default $2,750 under 500 sq ft. 1-car solid Option 1 ($2,600) becomes $2,750.')}
+  ${lockedField('Small solid floor — under (sq ft)','settings.rates.smallSolidFloor.maxSqft','number','Solid sq ft under this size uses the minimum below. Default 400. The count is the job total, not each area.')}
+  ${lockedField('Small solid floor minimum ($)','settings.rates.smallSolidFloor.min','number','Default $2,750 under 400 sq ft. A 1-car solid Option 1 package ($2,600) becomes $2,750.')}
+  ${lockedField('Mid solid floor — from (sq ft)','settings.rates.smallSolidFloor.bands.0.minSqft','number','Inclusive. Default 400.')}
+  ${lockedField('Mid solid floor — under (sq ft)','settings.rates.smallSolidFloor.bands.0.maxSqft','number','Exclusive. Default 500, so this band is 400–499 sq ft. 500 and above stay on the rate.')}
+  ${lockedField('Mid solid floor minimum ($)','settings.rates.smallSolidFloor.bands.0.min','number','Leave blank to use the selected tier’s 2-car solid package price. Staff and customers see one minimum line, with no source note.')}
   </div></details>
   <details><summary>Optional extras ${owner?'':'🔒'}</summary><div class="detail-body">
   <p class="method-note">Selling prices for optional lines. Moisture primer and self-leveling stay on the rates above ($4/sq ft and $6/sq ft at 1/4 inch). Per-sq-ft extras above $40 are blocked.</p>
@@ -1391,7 +1398,7 @@ function ratesView(){
   </div></details>`}
   <details><summary>Business wording ${owner?'':'🔒'}</summary><div class="detail-body"><div class="fields">${lockedField('Business name','settings.business.name')}${lockedField('Business phone','settings.business.phone')}${lockedField('Business address','settings.business.address')}${lockedField('Business email','settings.business.email','email')}${owner?textArea('Competitive pricing review wording','settings.notes'):`<div class="field locked"><label>Competitive pricing review wording <span class="lock-pill">OWNER ONLY</span></label><textarea disabled readonly>${escape(state.settings.notes||'')}</textarea></div>`}</div>${crewSettingsHTML()}</div></details>
   <details open><summary>Catalog packages — starting prices & adjustments ${owner?'':'🔒'}</summary><div class="detail-body">
-  <div class="notice"><b>Garage packages</b> use the tier / system / size table. Overflow past 250 / 450 / 650 sq ft uses that tier’s rate for the system. The solid credit is kept for books with no table. A solid package under 500 sq ft is at least $2,750. Flatwork above 32 sq ft is quoted per sq ft.</div>
+  <div class="notice"><b>Garage packages</b> use the tier / system / size table. Overflow past 250 / 450 / 650 sq ft uses that tier’s rate for the system. The solid credit is kept for books with no table. A solid package under 400 sq ft is at least $2,750. From 400 to 499 sq ft a solid floor shows one minimum line. Flatwork above 32 sq ft is quoted per sq ft.</div>
   <h4 style="margin:12px 0 6px;font-size:13px">Package price table</h4>
   ${[['opt1','Option 1'],['opt2','Option 2'],['regular','Regular']].map(([tier,label])=>`<h4 style="margin:10px 0 6px;font-size:13px">${label}</h4><div class="fields three">${['solid','flake','metallic'].map(sys=>['oneCar','1-car','twoCar','2-car','threeCar','3-car'].reduce((html,part,i,arr)=>{if(i%2)return html;return html+lockedField(sys+' '+arr[i+1]+' ($)','settings.garage.packages.'+tier+'.'+sys+'.'+part,'number');},'')).join('')}</div>`).join('')}
   <h4 style="margin:12px 0 6px;font-size:13px">Garage packages</h4>
@@ -1569,7 +1576,8 @@ function internalContent(print=false){
       </ul>
     </section>`;
   }).join('');
-  const warnList=(x.warnings||[]).map(w=>`<li>${escape(w)}</li>`).join('')||'<li>No engine warnings right now.</li>';
+  const costWarning=/cost|profit|margin|markup|\/mi\b|per mile|mileage rate|pay rate|hourly|wage|overhead \$|supplier/i;
+  const warnList=(x.warnings||[]).filter(w=>owner||!costWarning.test(String(w))).map(w=>`<li>${escape(w)}</li>`).join('')||'<li>No engine warnings right now.</li>';
   const confirmList=[
     'Manufacturer product SKUs / system acceptance for selected finishes',
     'Exact color / flake blend sample approval before install',
