@@ -110,7 +110,8 @@ function lockedField(label,path,type='text',placeholder='',extra=''){
   const v=getPath(path); const show=v==null||v===undefined?'':v;
   return `<div class="field locked"><label>${escape(label)} <span class="lock-pill">OWNER ONLY</span></label><input type="${type==='number'?'text':type}" value="${escape(show)}" disabled readonly><small>${authMode()?'Set by the owner (server-enforced).':'Locked in worker preview. Owner can edit rates in demo.'}</small></div>`;
 }
-function lockedCField(label,key,help=''){return lockedField(label,'settings.costs.'+key,'number',help)}
+function statusTag(status){return isOwner()&&status?' <span class="lock-pill">'+escape(status)+'</span>':'';}
+function lockedCField(label,key,help='',status){return lockedField(label+statusTag(status),'settings.costs.'+key,'number',help)}
 
 function guidedArea(base){
   const raw=base||{};
@@ -430,11 +431,17 @@ function normalTierRate(a){
   const opt=j&&j.priceOption&&j.priceOption!=='regular'&&state.settings.pricingOptions?state.settings.pricingOptions[j.priceOption]:null;
   const tier=opt&&opt.rates&&opt.rates[style]!=null&&opt.rates[style]!==''?E.n(opt.rates[style]):null;
   const base=tier==null?E.n(book[style]):tier;
-  let extra=0;
-  if(style==='solid')extra=Math.max(0,E.n(a.coats)-1)*E.n(book.extraCoat!=null?book.extraCoat:1.5);
-  if(style==='flake')extra=a.flake==='full'?E.n(book.fullFlakeExtra!=null?book.fullFlakeExtra:1):(a.flake==='medium'?E.n(book.mediumFlakeExtra!=null?book.mediumFlakeExtra:0.5):0);
   if(style==='level')return base*(Math.min(E.n(a.depth),2)/0.25);
-  return base+extra;
+  return base;
+}
+function areaUpgrade(a){
+  const book=state.settings.rates||{};
+  const style=['solid','flake','metallic','sealer','level'].includes(a.style)?a.style:'solid';
+  let extra=0,label='';
+  if(style==='solid'){extra=Math.max(0,E.n(a.coats)-1)*E.n(book.extraCoat!=null?book.extraCoat:1.5);label='Additional solid base coat(s)';}
+  if(style==='flake'&&a.flake==='full'){extra=E.n(book.fullFlakeExtra!=null?book.fullFlakeExtra:1);label='Full-broadcast flake upgrade';}
+  if(style==='flake'&&a.flake==='medium'){extra=E.n(book.mediumFlakeExtra!=null?book.mediumFlakeExtra:0.5);label='Medium-broadcast flake upgrade';}
+  return {extra,label};
 }
 function rateOverrideField(a,base){
   const path=base+'.rate';
@@ -444,8 +451,9 @@ function rateOverrideField(a,base){
   const problem=S?S.customRateProblem(a):null;
   return `<div class="field rate-override"><label for="f-${escape(path)}">Override $/sq ft (optional)</label>
     <div class="rate-row"><input id="f-${escape(path)}" data-path="${escape(path)}" type="number" inputmode="decimal" min="3" max="20" step="0.01" value="${escape(v)}">
-    <span class="rate-hint">Normal for this area ${cash(normal)} / sq ft</span></div>
-    <small>Leave blank to use that rate. Allowed override is $3–$20 per sq ft.</small>
+    <span class="rate-hint">Finish rate ${cash(normal)} / sq ft</span></div>
+    ${(()=>{const up=areaUpgrade(a);if(!(up.extra>0))return '';const sf=computeAreaSqft(a);return `<p class="method-note">${escape(up.label)}: ${cash(up.extra)} / sq ft${sf?' · '+cash(sf*up.extra)+' on this area':''}. Separate line, so the finish rate × sq ft equals the finish amount.</p>`;})()}
+    <small>Leave blank to use that rate. Allowed override is $3–$20 per sq ft. Flake and extra-coat upgrades stay on top of the tier and show as their own line.</small>
     ${problem?`<p class="warn-banner rate-error" role="alert">${escape(problem.message)}</p>`:''}
   </div>`;
 }
@@ -560,7 +568,7 @@ async function decideExtraDiscount(decision){
 }
 function calcLocal(){const j=ensureJob();syncPrepIntoEngineFields(j);syncDiscountApproval(j);return E.calculate(j,state.settings);}
 const SERVER_FIELDS=['sqft','finished','levelArea','levelEquiv','lines','base','regularBase','discountable','discountSqft','choices','selected','addOn','discount','minimum','subtotal','salesTax','total','perSqft','balance','finalizedBlocked','personHours','hours','travelMiles','warnings','quoteReady','quoteStatus','pendingReasons'];
-const COST_FIELDS=['cost','profit','margin','mat','tax','labor','equip','overhead','overheadBase','contingency','travelCost','travelInQuote','direct'];
+const COST_FIELDS=['cost','profit','margin','mat','tax','labor','equip','overhead','overheadBase','contingency','travelCost','travelInQuote','direct','grossProfit','grossMargin','operatingProfit','operatingMargin'];
 function stripCosts(x){
   const y=Object.assign({},x);
   for(const k of COST_FIELDS)if(k in y)y[k]=0;
@@ -746,7 +754,8 @@ function garagePackageHTML(j){
   };
   return `<div class="fields">${pkgs.map(([id,label])=>'').join('')}
     <div class="finish-picker" role="group">${pkgs.map(([id,label])=>`<button type="button" class="finish-choice ${j.garagePackage===id?'active':''}" data-garage-package="${id}" aria-pressed="${j.garagePackage===id}"><b>${escape(label)}</b><small style="display:block;margin-top:4px;font-size:10px;color:var(--muted)">${escape(startFor(id))}</small></button>`).join('')}</div>
-    ${j.garagePackage!=='measured'?`${(cat.disclaimer||'').trim()?`<div class="warn-banner"><b>Garage package baseline:</b> ${escape(cat.disclaimer.trim())}</div>`:''}<div class="notice">1/2/3-car selection uses the configured package <b>starting price</b> from the rate book (not floor $/sq ft). Material, topcoat, and condition/prep adjustments change the price when configured.</div>
+    ${j.garagePackage!=='measured'?`${(cat.disclaimer||'').trim()?`<div class="warn-banner"><b>Garage package baseline:</b> ${escape(cat.disclaimer.trim())}</div>`:''}<div class="notice">The base fee covers a typical <b>1-car 250 sq ft</b>, <b>2-car 450 sq ft</b>, or <b>3-car 650 sq ft</b>. Any measured sq ft above that size is charged at the selected tier’s per-sq-ft rate. A solid system takes the tier-aligned credit (−$750 / −$1,350 / −$1,950).</div>
+      <div class="fields">${field('Measured sq ft','job.areas.0.sqft','number','Leave blank to price the typical size only. Square feet above 250 / 450 / 650 use the tier rate.','step="1"')}</div>
       <div class="fields three">
         ${select('Material / system','job.garageStyle',[['solid','Solid'],['flake','Flake'],['metallic','Metallic'],['sealer','Clear seal'],['custom','Custom / other']])}
         ${select('Topcoat','job.garageTopcoat',[['protective','Protective (standard)'],['none','None noted'],['premium','Premium / upgraded']])}
@@ -1161,7 +1170,10 @@ function ownerViewHTML(){
       <div class="summary-row"><span>Estimated job cost</span><strong>${cash(x.cost)}</strong></div>
       <div class="summary-row"><span>Travel included in the quote</span><strong>${cash((x.sqft?x.travel.mileage:0)+(x.sqft?x.travel.crewTravel:0))}</strong></div>
       <div class="summary-row"><span>Potential remainder</span><strong class="${x.profit<0?'loss':''}">${cash(x.profit)}</strong></div>
-      <div class="summary-row"><span>Estimated margin</span><strong>${num(x.margin)}%</strong></div>
+      <div class="summary-row"><span>Gross margin</span><strong>${num(x.grossMargin,1)}%</strong></div>
+      <div class="summary-row"><span>Net margin after overhead</span><strong>${num(x.operatingMargin,1)}%</strong></div>
+      <div class="summary-row"><span>Margin after contingency and per-job tooling</span><strong>${num(x.margin,1)}%</strong></div>
+      <p class="method-note">Gross is price minus labor minus materials. Net subtracts the monthly overhead spread only. A 30% markup is a 23.1% margin, not a 30% margin.</p>
       <div class="summary-row"><span>Approved adjustment limit</span><strong>${approvedAdjustmentLabel()}</strong></div>
       <button type="button" class="button secondary" data-view="internal">Internal job-cost and travel</button>
     </div>
@@ -1172,10 +1184,10 @@ function stepPricing(j){
   const x=calc();
   const moist=moistureSelectedAreas(j);
   const catalog=isCatalogJob(j);
-  const tierChoices=catalog?[['regular','Regular (catalog starting + adjustments)']]:[['regular','Regular · full price'],['opt1','Option 1 · bank transfer'],['opt2','Option 2 · scheduled payments']];
+  const tierChoices=[['regular','Regular · full price'],['opt1','Option 1 · bank transfer'],['opt2','Option 2 · scheduled payments']];
   return `<section class="card">${cardHead('05','Customer pricing & payments','Pick one price. Travel stays inside the total.')}
   ${priceNeededBanner(x)}
-  ${catalog?`<div class="notice"><b>Package pricing.</b> Garage, counter, and seating jobs use the configured starting price plus adjustments. The three floor prices are for measured floors.</div>${catalogBreakdownDocHTML(x)}`
+  ${catalog?`<div class="notice"><b>Package pricing.</b> A garage base fee covers the typical size. Square feet above that use the tier rate selected below. Counters and seating use their starting prices. Flake and extra-coat upgrades on measured floors stay as their own lines on top of the tier.</div>${catalogBreakdownDocHTML(x)}`
     :`<p class="hint">Regular is the full price. Option 1 is lower when the customer pays by bank transfer: half to book the job, half at the final walkthrough. Option 2 is in between and splits into three payments — half, then 25%, then the last 25% within 14 days. Choose one. They do not combine.</p>
     <div id="optionCards" class="option-grid">${optionCardsHTML(x)}</div>`}
   <div class="fields">${select('Selected price','job.priceOption',tierChoices)}</div>
@@ -1184,11 +1196,10 @@ function stepPricing(j){
     <div class="fields">${select('Document type','job.docType',[['estimate','Estimate'],['invoice','Invoice']])}${field('Customer sales tax (%)','job.tax','number')}</div>
     ${checkbox('Show all pricing options on the customer document','job.showOptions')}
     <div class="divider"></div>
-    ${checkbox('Include standard property / trip add-in','job.addOnIncluded')}
-    <p class="hint">The property add-in is $1 per sq ft and stays off until you check this. It is its own line, not part of the finish price.</p>
-    <div class="fields">${select('Add-in rate','job.addOnTier',[['low','$'+E.n(state.settings.addOn.low).toFixed(2)+' / sq ft (standard)'],['high','$'+E.n(state.settings.addOn.high).toFixed(2)+' / sq ft']],'Used only when the add-in box is checked.')}
+    <p class="hint">The property / trip add-in is included in the base price. There is no separate add-in line.</p>
+    <div class="fields">
     ${select('Customer pricing method','job.method',[['rates','Customer rates per square foot'],['cost','Estimated cost + markup'],['agreed','Agreed total / manual quote']])}
-    ${(()=>{const owner=isOwner();if(j.method==='cost')return owner?field('Markup on estimated cost (%)','job.markup','number'):lockedField('Markup on estimated cost (%)','job.markup','number','Owner-only');if(j.method==='agreed')return owner?field('Agreed total before discount / tax','job.agreedTotal','number'):lockedField('Agreed total before discount / tax','job.agreedTotal','number','Owner-only');return '';})()}
+    ${(()=>{const owner=isOwner();if(j.method!=='cost'){if(j.method==='agreed')return owner?field('Agreed total before discount / tax','job.agreedTotal','number'):lockedField('Agreed total before discount / tax','job.agreedTotal','number','Owner-only');return ''}const margin=E.markupToMargin(j.markup);const help='(= '+E.n(j.markup).toFixed(2)+'% markup). 30 markup is '+E.markupToMargin(30).toFixed(1)+'% margin, not 30% margin.';return owner?`<div class="field"><label for="f-job.marginTarget">Target margin on price (%)</label><input id="f-job.marginTarget" data-margin-input="1" type="number" min="0" max="80" step="0.01" value="${escape(margin.toFixed(2))}"><small>${escape(help)}</small></div>`:lockedField('Target margin on price (%)','job.markup','number',help);})()}
     </div>
     ${quoteAllocationHTML(x)}
     ${j.docType==='invoice'?field('Payments received ($)','job.paid','number'):''}
@@ -1260,6 +1271,24 @@ function guidedView(){
     +wizardRail(j)+`<div class="layout" data-wizard-step="${escape(step)}"><div class="stack">${body}${navFooter(j)}</div><aside class="summary" id="liveSummary">${summaryHTML()}</aside></div>`;
 }
 function cField(label,key,help=''){return field(label,'settings.costs.'+key,'number',help)}
+function overheadPanelHTML(){
+  if(!isOwner())return '<p class="method-note">Monthly overhead is owner-only.</p>';
+  const lines=state.settings.costs.overheadLines||[];
+  const spread=E.overheadSpread(state.settings.costs);
+  const rows=lines.map((l,i)=>`<div class="fields three">${field('Overhead line','settings.costs.overheadLines.'+i+'.label','text')}${field('Monthly amount ($)','settings.costs.overheadLines.'+i+'.monthly','number','','min="0" step="0.01"')}${select('Source tag','settings.costs.overheadLines.'+i+'.status',[['OWNER-PROVIDED','OWNER-PROVIDED'],['VERIFIED','VERIFIED'],['NOT VERIFIED','NOT VERIFIED']])}<p class="method-note">${escape(l.note||'')}</p></div>`).join('');
+  return `<h4 style="margin:0 0 8px;font-size:13px">Monthly overhead ${statusTag('OWNER-PROVIDED')}</h4>
+  <p class="method-note">One all-inclusive amount. Licensing, insurance, and equipment sit inside it. The per-hour spread is this total divided by billable person-hours.</p>
+  ${rows}
+  <p class="method-note" id="overheadSpread">Total ${cash(spread.monthly)} / ${num(spread.hours,0)} billable person-hours = <b>${cash(spread.perHour)} per hour</b>.</p>`;
+}
+function catalogAdjFields(label,path){
+  const v=getPath(path);
+  const neg='min="-10000" step="1"';
+  if(v&&typeof v==='object'){
+    return lockedField(label+' · 1-car ($)',path+'.oneCar','number','Negative is a credit.',neg)+lockedField(label+' · 2-car ($)',path+'.twoCar','number','Negative is a credit.',neg)+lockedField(label+' · 3-car ($)',path+'.threeCar','number','Negative is a credit.',neg);
+  }
+  return lockedField(label+' ($)',path,'number','Negative is a credit.',neg);
+}
 function ratesView(){
   const owner=isOwner();
   return heading('YOUR RATE BOOK','Costs & pricing.','Owner-approved rates. Workers use locked values.','')
@@ -1269,23 +1298,30 @@ function ratesView(){
   ${bookIssuesHTML()}
   <details open><summary>Customer selling rates ${owner?'':'🔒'}</summary><div class="detail-body"><div class="fields three">${Object.entries({solid:'Solid epoxy / sq ft',flake:'Flake epoxy / sq ft',metallic:'Metallic epoxy / sq ft',sealer:'Clear seal / sq ft',level:'Leveling / sq ft at ¼ inch',removal:'Extra removal / sq ft',moisture:'Moisture control / sq ft',extraCoat:'Additional solid base coat / sq ft',mediumFlakeExtra:'Medium flake premium / sq ft',fullFlakeExtra:'Full flake premium / sq ft'}).map(([k,v])=>lockedField(v,'settings.rates.'+k,'number','$0–$40 per sq ft. Above $20 asks the owner to confirm.','min="0" max="40" step="0.01" inputmode="decimal"')).join('')}${lockedField('Patch / kit installed','settings.rates.patch','number')}</div></div></details>
   <details open><summary>Payment tiers & property add-in ${owner?'':'🔒'}</summary><div class="detail-body"><p>Regular is 7 / 10 / 15. Option 1 is bank transfer, 5 / 8 / 11, half at booking and half at the final walkthrough. Option 2 is 6 / 9 / 13, with 50%, 25%, and 25% within 14 days. Tiers do not stack and there is no extra 40% off. Prep and removal stay at their own prices. No material surcharge is added.</p>${['opt1','opt2'].map(k=>`<div class="fields three" style="margin-bottom:14px">${lockedField('Option label','settings.pricingOptions.'+k+'.label')}${lockedField('Solid / sq ft','settings.pricingOptions.'+k+'.rates.solid','number','$0–$40 per sq ft.','min="0" max="40" step="0.01" inputmode="decimal"')}${lockedField('Flake / sq ft','settings.pricingOptions.'+k+'.rates.flake','number','$0–$40 per sq ft.','min="0" max="40" step="0.01" inputmode="decimal"')}${lockedField('Metallic / sq ft','settings.pricingOptions.'+k+'.rates.metallic','number','$0–$40 per sq ft.','min="0" max="40" step="0.01" inputmode="decimal"')}${state.settings.pricingOptions[k].schedule.map((p,i)=>lockedField((p.label||('Payment '+(i+1)))+' %','settings.pricingOptions.'+k+'.schedule.'+i+'.pct','number')).join('')}</div>`).join('')}
-  <div class="fields three">${lockedField('Property add-in label','settings.addOn.label')}${lockedField('Standard add-in / sq ft ($)','settings.addOn.low','number','$0–$40 per sq ft.','min="0" max="40" step="0.01" inputmode="decimal"')}${lockedField('Higher add-in / sq ft ($)','settings.addOn.high','number','$0–$40 per sq ft.','min="0" max="40" step="0.01" inputmode="decimal"')}</div></div></details>
-  ${authMode()&&!owner?'<div class="info-banner es-costs-hidden"><b>Internal costs are owner-only.</b> Materials, labor, travel, equipment and overhead costs, markup, profit and margin are not sent to employee devices.</div>':`<details><summary>Materials, labor, travel, equipment, overhead ${owner?'':'🔒'}</summary><div class="detail-body"><div class="fields three">${lockedCField('Loaded labor / person-hour ($)','labor')}${lockedCField('Vehicle cost / mile ($)','mile','ONE mileage rate ($0.85). Travel folds into internal overhead.')}${lockedCField('Material waste (%)','waste')}${lockedCField('Business overhead / job ($)','overhead')}${lockedCField('Contingency reserve (%)','contingency')}${lockedCField('Grinder + extractor / day ($)','rentalDay')}${lockedCField('Diamond tooling allowance ($)','tooling')}${lockedCField('Supplies allowance ($)','supplies')}${lockedCField('Dust bags / filters ($)','dust')}${lockedCField('Disposal allowance ($)','disposal')}</div>
+  <p class="method-note">The property / trip add-in is folded into the base price. It is not a separate line. Defaults stay at $0.</p>
+  ${lockedField('Minimum job charge ($)','settings.rates.minimumJob','number','Applied to the subtotal before the payment split. An owner-approved discount can go below it. Employees cannot.'+statusTag(E.FIGURE_STATUS.minimumJob),'min="0" step="1"')}
+  </div></details>
+  ${authMode()&&!owner?'<div class="info-banner es-costs-hidden"><b>Internal costs are owner-only.</b> Materials, labor, travel, equipment and overhead costs, markup, profit and margin are not sent to employee devices.</div>':`<details open><summary>Materials, labor, travel, equipment, overhead ${owner?'':'🔒'}</summary><div class="detail-body">${overheadPanelHTML()}
+  <div class="fields three">${lockedCField('Loaded labor / person-hour ($)','labor','',E.FIGURE_STATUS.labor)}${lockedCField('Vehicle cost / mile ($)','mile','Fuel stays per job. Travel folds into internal overhead.',E.FIGURE_STATUS.mile)}${lockedCField('Material waste (%)','waste','',E.FIGURE_STATUS.waste)}${lockedCField('Materials purchase tax (%)','purchaseTax','Chicago 10.5% since Aug 1 2026. Customer sales tax on installed floors stays 0.',E.FIGURE_STATUS.purchaseTax)}${lockedCField('Setup / cleanup person-hrs per job','setupHours','',E.FIGURE_STATUS.setupHours)}${lockedCField('Billable person-hours / month','billableHoursPerMonth','4 people × about 112 hours. The per-hour rate is monthly overhead divided by this.',E.FIGURE_STATUS.billableHoursPerMonth)}${lockedCField('Contingency reserve (%)','contingency')}${lockedCField('Grind sq ft / person-hr','grindProduction','',E.FIGURE_STATUS.grindProduction)}${lockedCField('Base coat sq ft / person-hr','baseProduction','',E.FIGURE_STATUS.baseProduction)}${lockedCField('Flake broadcast sq ft / person-hr','flakeProduction','',E.FIGURE_STATUS.flakeProduction)}${lockedCField('Topcoat sq ft / person-hr','topProduction','',E.FIGURE_STATUS.topProduction)}${lockedCField('Metallic sq ft / person-hr','metallicProduction','',E.FIGURE_STATUS.metallicProduction)}${lockedCField('Solid material $ / sq ft','materialPerSqft.solid','Internal cost only.',E.FIGURE_STATUS.materialSolid)}${lockedCField('Flake material $ / sq ft','materialPerSqft.flake','Internal cost only.',E.FIGURE_STATUS.materialFlake)}${lockedCField('Metallic material $ / sq ft','materialPerSqft.metallic','Internal cost only.',E.FIGURE_STATUS.materialMetallic)}</div>
+  ${owner?checkbox('Disposal and equipment are included in monthly overhead','settings.costs.allowancesInOverhead'):''}
+  <p class="method-note">When that box is on, per-job grinder rental, tooling, supplies, dust, and disposal allowances are $0, and the old $1,000 flat overhead is $0. Fuel stays per job. Turn it off only if those allowances are not already inside the $15,000.</p>
+  <div class="fields three">${lockedCField('Grinder + extractor / day ($)','rentalDay','Not charged while the overhead box is on.')}${lockedCField('Diamond tooling allowance ($)','tooling','Not charged while the overhead box is on.',E.FIGURE_STATUS.tooling)}${lockedCField('Supplies allowance ($)','supplies','Not charged while the overhead box is on.',E.FIGURE_STATUS.supplies)}${lockedCField('Dust bags / filters ($)','dust','Not charged while the overhead box is on.')}${lockedCField('Disposal allowance ($)','disposal','Not charged while the overhead box is on.')}</div>
   <p class="method-note">Product package sizes and coverages are planning allowances. Travel + equipment costs fold into internal overhead; customers never see separate equipment or mileage lines.</p>
   ${Object.entries(state.settings.products).map(([k,p])=>`<div class="product-edit"><div class="product-name">${escape(p.label)} ${owner?'':'🔒'}</div>${lockedField('Package size','settings.products.'+k+'.size','number')}${lockedField('Price / package ($)','settings.products.'+k+'.price','number')}${p.coverage?lockedField('Coverage','settings.products.'+k+'.coverage','number'):'<div class="field"><label>Coverage</label><small>From selection</small></div>'}</div>`).join('')}
   </div></details>`}
   <details><summary>Business wording ${owner?'':'🔒'}</summary><div class="detail-body"><div class="fields">${lockedField('Business name','settings.business.name')}${lockedField('Business phone','settings.business.phone')}${lockedField('Business address','settings.business.address')}${lockedField('Business email','settings.business.email','email')}${owner?textArea('Competitive pricing review wording','settings.notes'):`<div class="field locked"><label>Competitive pricing review wording <span class="lock-pill">OWNER ONLY</span></label><textarea disabled readonly>${escape(state.settings.notes||'')}</textarea></div>`}</div></div></details>
   <details open><summary>Catalog packages — starting prices & adjustments ${owner?'':'🔒'}</summary><div class="detail-body">
-  <div class="warn-banner"><b>No invented defaults.</b> Garage package flats, flatwork size-band starts, and seating per-item prices were <b>not</b> found as approved values in brand-brain / rate book searches. Leave blank (= unconfigured) until Double provides amounts. Unconfigured jobs stay <b>Pending</b> — never a misleading $0 final.</div>
+  <div class="notice"><b>Garage base fees</b> cover typical sizes: 1-car 250 sq ft ($2,000), 2-car 450 sq ft ($3,150), 3-car 650 sq ft ($4,900). Square feet above that size use the selected tier rate. Solid is a credit of −$750 / −$1,350 / −$1,950. Flatwork above 32 sq ft is quoted per sq ft. Seating starts stay blank until set.</div>
   <h4 style="margin:12px 0 6px;font-size:13px">Garage packages</h4>
   ${((state.settings.catalog&&state.settings.catalog.garage&&state.settings.catalog.garage.disclaimer)||'').trim()?`<div class="warn-banner"><b>Garage package baseline:</b> ${escape(String(state.settings.catalog.garage.disclaimer).trim())}</div>`:''}
   <div class="fields three">${lockedField('1-car starting price ($)','settings.catalog.garage.oneCarStarting','number','Blank = Starting price needed')}${lockedField('2-car starting price ($)','settings.catalog.garage.twoCarStarting','number')}${lockedField('3-car starting price ($)','settings.catalog.garage.threeCarStarting','number')}</div>
   <p class="method-note">>3-car must use measured sq ft (floor rate book) — no flat package field.</p>
-  <div class="fields three">${lockedField('Material adj · solid ($)','settings.catalog.garage.materialAdj.solid','number')}${lockedField('Material adj · flake ($)','settings.catalog.garage.materialAdj.flake','number')}${lockedField('Material adj · metallic ($)','settings.catalog.garage.materialAdj.metallic','number')}${lockedField('Material adj · sealer ($)','settings.catalog.garage.materialAdj.sealer','number')}${lockedField('Material adj · custom ($)','settings.catalog.garage.materialAdj.custom','number')}${lockedField('Topcoat adj · premium ($)','settings.catalog.garage.topcoatAdj.premium','number')}</div>
+  <div class="fields three">${catalogAdjFields('Solid credit','settings.catalog.garage.materialAdj.solid')}${lockedField('Material adj · flake ($)','settings.catalog.garage.materialAdj.flake','number','0 means included in the base fee.','min="-10000" step="1"')}${lockedField('Material adj · metallic ($)','settings.catalog.garage.materialAdj.metallic','number','','min="-10000" step="1"')}${lockedField('Material adj · sealer ($)','settings.catalog.garage.materialAdj.sealer','number','','min="-10000" step="1"')}${lockedField('Material adj · custom ($)','settings.catalog.garage.materialAdj.custom','number','','min="-10000" step="1"')}${lockedField('Topcoat adj · premium ($)','settings.catalog.garage.topcoatAdj.premium','number','','min="-10000" step="1"')}</div>
   <div class="fields three">${lockedField('Condition · unknown ($)','settings.catalog.garage.conditionAdj.unknown','number','Do not leave blank if unknown jobs must price')}${lockedField('Condition · fair ($)','settings.catalog.garage.conditionAdj.fair','number')}${lockedField('Condition · poor ($)','settings.catalog.garage.conditionAdj.poor','number')}${lockedField('Condition · critical ($)','settings.catalog.garage.conditionAdj.critical','number')}${lockedField('Condition · paint ($)','settings.catalog.garage.conditionAdj.paint','number')}${lockedField('Condition · adhesive ($)','settings.catalog.garage.conditionAdj.adhesive','number')}</div>
   <div class="fields three">${lockedField('Prep · cracks ($)','settings.catalog.garage.prepAdj.cracks','number')}${lockedField('Prep · spalling ($)','settings.catalog.garage.prepAdj.spalling','number')}${lockedField('Prep · coating removal ($)','settings.catalog.garage.prepAdj.coatingRemoval','number')}${lockedField('Prep · patching ($)','settings.catalog.garage.prepAdj.patching','number')}${lockedField('Prep · leveling ($)','settings.catalog.garage.prepAdj.leveling','number')}${lockedField('Prep · moisture ($)','settings.catalog.garage.prepAdj.moisture','number')}</div>
   <h4 style="margin:16px 0 6px;font-size:13px">Flatwork (tables / countertops / bars) size bands</h4>
   ${(state.settings.catalog.flatwork.sizeBands||[]).map((b,i)=>`<div class="fields three">${lockedField(b.label+' · starting ($)','settings.catalog.flatwork.sizeBands.'+i+'.starting','number')}<div class="field"><label>Band id</label><input disabled value="${escape(b.id)}"></div><div class="field"><label>Max sq ft</label><input disabled value="${escape(b.maxSqft==null?'(open)':b.maxSqft)}"></div></div>`).join('')}
+  <div class="fields">${lockedField('Largest flatwork item (sq ft)','settings.catalog.flatwork.maxItemSqft','number','Above this, measure and quote per sq ft on the floor flow, or set a custom starting price.')}</div>
   <div class="fields three">${lockedField('Flatwork material · solid ($)','settings.catalog.flatwork.materialAdj.solid','number')}${lockedField('Flatwork material · flake ($)','settings.catalog.flatwork.materialAdj.flake','number')}${lockedField('Flatwork material · metallic ($)','settings.catalog.flatwork.materialAdj.metallic','number')}${lockedField('Flatwork topcoat · premium ($)','settings.catalog.flatwork.topcoatAdj.premium','number')}${lockedField('Flatwork condition · unknown ($)','settings.catalog.flatwork.conditionAdj.unknown','number')}${lockedField('Flatwork condition · fair ($)','settings.catalog.flatwork.conditionAdj.fair','number')}${lockedField('Flatwork condition · poor ($)','settings.catalog.flatwork.conditionAdj.poor','number')}${lockedField('Flatwork condition · critical ($)','settings.catalog.flatwork.conditionAdj.critical','number')}</div>
   <h4 style="margin:16px 0 6px;font-size:13px">Seating (chairs / stools)</h4>
   <div class="fields three">${lockedField('Chair starting / item ($)','settings.catalog.seating.byType.chair','number')}${lockedField('Stool starting / item ($)','settings.catalog.seating.byType.stool','number')}${lockedField('Other seating / item ($)','settings.catalog.seating.byType.other','number')}</div>
@@ -1312,6 +1348,7 @@ function areaDimsHTML(a){
 
 
 function fmtBaselineMoney(v){
+  if(v&&typeof v==='object'&&!Array.isArray(v))return ['oneCar','twoCar','threeCar'].filter(k=>k in v).map(k=>({oneCar:'1-car',twoCar:'2-car',threeCar:'3-car'}[k]||k)+' '+fmtBaselineMoney(v[k])).join(' · ');
   if(v===null||v===undefined||v==='')return 'Pending';
   const n=Number(v);
   if(!Number.isFinite(n))return 'Pending';
@@ -1469,7 +1506,7 @@ function internalContent(print=false){
       ${field('Vehicles per visit','job.vehicles','number','','step="1"')}
       ${owner?field('One-way distance (miles)','job.miles','number','Manual override / after route'):lockedField('One-way distance (miles)','job.miles','number','Owner override in demo')}
       ${owner?field('One-way drive time (minutes)','job.minutes','number'):lockedField('One-way drive time (minutes)','job.minutes','number')}
-      ${owner?select('Crew size','job.crew',[[3,'3-person crew (standard)'],[2,'2-person crew']],'Internal — multiplies drive time only'):`<div class="field locked"><label>Crew size <span class="lock-pill">OWNER ONLY</span></label><input disabled value="${escape(String(j.crew||3))}"></div>`}
+      ${owner?select('Crew size','job.crew',[[4,'4-person crew'],[3,'3-person crew (standard)'],[2,'2-person crew']],'Internal — multiplies drive time only. Travel crew can be 2, 3, or 4.'):`<div class="field locked"><label>Crew size <span class="lock-pill">OWNER ONLY</span></label><input disabled value="${escape(String(j.crew||3))}"></div>`}
       ${owner?field('Mileage rate ($ / vehicle mile)','settings.costs.mile','number','Existing $0.85'):''}
       ${owner?field('Equipment rental days','job.rentalDays','number','','step="1"'):lockedField('Equipment rental days','job.rentalDays','number')}
     </div>
@@ -1955,7 +1992,13 @@ function readPhotoFile(file, areaId, bucket){
   reader.readAsDataURL(file);
 }
 document.addEventListener('input',e=>{
-  const t=e.target;if(!t.dataset.path)return;
+  const t=e.target;
+  if(t.dataset.marginInput){
+    const margin=t.value===''?0:Number(t.value);
+    activeJob().markup=E.marginToMarkup(margin);
+    save();updateLive();return;
+  }
+  if(!t.dataset.path)return;
   const path=String(t.dataset.path);
   // Worker preview: block rate-book / cost / product / business pricing edits (UX lock only — not security)
   if(!isOwner()&&(path.startsWith('settings.rates')||path.startsWith('settings.costs')||path.startsWith('settings.products')||path.startsWith('settings.pricingOptions')||path.startsWith('settings.addOn')||path.startsWith('settings.catalog')||path.startsWith('settings.business')||path.startsWith('settings.approvedAdjustment')||path==='settings.notes'||path==='settings.costs.mile')){
