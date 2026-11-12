@@ -187,8 +187,8 @@ function guidedJob(base){
   if(hadGlobal && !areaHadMoisture){
     j._moistureLegacyReview={
       needed:true,
-      label:'REVIEW WITH DOUBLE',
-      detail:'A previous job-level moisture selection was found, but v5 charges moisture only on areas you check. No area was auto-checked. Confirm with Double which area(s) need the moisture-control primer before charging.'
+      label:'REVIEW WITH OWNER',
+      detail:'A previous job-level moisture selection was found, but v5 charges moisture only on areas you check. No area was auto-checked. Confirm with Owner which area(s) need the moisture-control primer before charging.'
     };
   }else if(raw._moistureLegacyReview){
     j._moistureLegacyReview=raw._moistureLegacyReview;
@@ -1713,7 +1713,7 @@ function customerGuideDocument(){
       <li>Moisture-control primer / barrier appears above only for area(s) where it was deliberately checked; it is optional per area and not auto-included on the whole job.</li>
       <li>Photos and walkthrough notes support scoping; they are not a standalone diagnosis.</li>
     </ul>
-    <p class="method-note">Open product confirmations for Double / manufacturer: exact primer/barrier product name, approved moisture test method &amp; thresholds, project cure/return schedule, any desired service-life planning range, exact care sheet, and warranty document linkage.</p>
+    <p class="method-note">Open product confirmations for Owner / manufacturer: exact primer/barrier product name, approved moisture test method &amp; thresholds, project cure/return schedule, any desired service-life planning range, exact care sheet, and warranty document linkage.</p>
   </div>
   </article>`;
 }
