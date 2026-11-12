@@ -17,8 +17,6 @@ jobs:
         with:
           node-version: 22
       - name: Run the test suite
-        run: |
-          set -eu
-          for f in tools/*.test.js; do
-            node "$f"
-          done
+        # `node tools/*.test.js` runs only the first file. This runner starts
+        # each tools/*.test.js and exits non-zero if any file fails.
+        run: node tools/run-tests.js
