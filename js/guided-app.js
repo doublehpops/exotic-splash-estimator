@@ -24,7 +24,7 @@ const STEPS=[
 ];
 const PREP_ITEMS=[
   {key:'cracks',label:'Cracks / joint issues',help:'Note size and movement. Major structural cracks need separate scope.',links:'notes'},
-  {key:'spalling',label:'Spalling / soft concrete',help:'May require patching or deeper prep. Confirm on site.',links:'patch'},
+  {key:'spalling',label:'Spalling / soft concrete',help:'Spalling means the concrete surface is flaking or crumbling. It may need patching. Confirm on site.',links:'patch'},
   {key:'coatingRemoval',label:'Existing coating / paint removal',help:'Adds removal rate across measured sq ft.',links:'removal'},
   {key:'patching',label:'Patching / hole repair',help:'Uses patch kit allowance from rate book.',links:'patch'},
   {key:'leveling',label:'Self-leveling needed',help:'Sets leveling on the area with entered average depth.',links:'level'}
@@ -289,6 +289,11 @@ function loadState(){
   ensureJob();
 }
 function storageSizeEstimate(){try{return (localStorage.getItem(STORAGE_KEY)||'').length}catch{return 0}}
+function paintSavePill(text,state){
+  document.querySelectorAll('.save-pill').forEach(el=>{el.hidden=false;el.textContent=text;el.dataset.state=state||''});
+}
+/* Server row is created only after a name and a phone, email, or address. "+ New job" alone stays on this device. */
+function readyForServer(j){return !!(j&&(j._serverId||contactSufficient(j)))}
 function warnFingerprint(warns){return (warns||[]).map(w=>w&&w.message?w.message:String(w||'')).join('\n')}
 function ownerAcked(j,warns){
   if(!warns||!warns.length)return true;
@@ -346,7 +351,8 @@ function save(opts){
     }
   }else if(j)refreshDraftMark(j);
   if(authMode()){ // never write price book / owner settings to this device; server save via runtime hook
-    if(runtime.onSave)runtime.onSave(j,opts||{});
+    if(readyForServer(j)&&runtime.onSave)runtime.onSave(j,opts||{});
+    else paintSavePill('Saved','saved');
     return;
   }
   const payload={version:APP_VERSION,settings:state.settings,jobs:state.jobs,activeJobId:state.activeJobId,view:state.view,cloud:{enabled:false,status:'OFF — not configured'},savedAt:nowISO()};
@@ -358,7 +364,7 @@ function save(opts){
     }
     localStorage.setItem(STORAGE_KEY,text);
     $('saveStatus').textContent='Saved locally · Cloud OFF';
-    const pill=$('savePill');if(pill)pill.textContent='Saved '+new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    paintSavePill('Saved','saved');
   }catch(err){
     $('saveStatus').textContent='Storage full — download a backup';
     toast('Could not autosave (browser storage full or blocked). Download a JSON backup now.');
@@ -460,23 +466,28 @@ function checkbox(label,path){return `<label class="check-label"><input type="ch
 function cardHead(n,title,sub='',right=''){return `<div class="card-head"><span class="step">${n}</span><div><h3>${title}</h3>${sub?`<div class="sub">${sub}</div>`:''}</div>${right?`<div class="right">${right}</div>`:''}</div>`}
 function heading(eyebrow,title,sub,action=''){return `<div class="page-head"><div><span class="eyebrow">${eyebrow}</span><h1>${title}</h1><p>${sub}</p></div>${action}</div>`}
 
+const STEP_NAMES={contact:'Contact',areas:'Areas',prep:'Prep',selections:'System',pricing:'Pricing',review:'Review'};
 function wizardRail(j){
-  const idx=STEPS.findIndex(s=>s.id===j.step);
+  const idx=Math.max(0,STEPS.findIndex(s=>s.id===j.step));
   const pct=Math.round(((idx+1)/STEPS.length)*100);
-  return `<div class="progress-bar" aria-hidden="true"><i style="width:${pct}%"></i></div>
+  const name=STEP_NAMES[j.step]||STEPS[idx].label;
+  const kicker='Step '+(idx+1)+' of '+STEPS.length+' · '+name;
+  return `<div class="wizard-progress"><p class="wizard-kicker" id="wizardKicker">${escape(kicker)}</p>
+  <div class="progress-bar" role="progressbar" aria-valuenow="${idx+1}" aria-valuemin="1" aria-valuemax="${STEPS.length}" aria-valuetext="${escape(kicker)}" aria-label="${escape(kicker)}"><i style="width:${pct}%"></i></div>
   <div class="wizard-rail" role="tablist" aria-label="Guided steps">${STEPS.map((s)=>{
     const st=stepStatus(j,s.id);const active=j.step===s.id;
-    return `<button type="button" class="wizard-step ${active?'active':''} ${st==='done'?'done':''}" data-step="${s.id}" role="tab" aria-selected="${active}"><span class="n">${s.short}</span><span class="lbl">${escape(s.label)}</span></button>`;
-  }).join('')}</div>`;
+    return `<button type="button" class="wizard-step ${active?'active':''} ${st==='done'?'done':''}" data-step="${s.id}" role="tab" aria-selected="${active}"><span class="n">${s.short}</span><span class="lbl">${escape(STEP_NAMES[s.id]||s.label)}</span></button>`;
+  }).join('')}</div></div>`;
 }
 function navFooter(j){
   const idx=STEPS.findIndex(s=>s.id===j.step);
   const prev=idx>0?STEPS[idx-1].id:null;
   const next=idx<STEPS.length-1?STEPS[idx+1].id:null;
+  const nextName=next?(STEP_NAMES[next]||STEPS[idx+1].label):'';
   return `<div class="nav-footer">
-    <button type="button" class="button secondary" data-step="${prev||''}" ${prev?'':'disabled'}>← Back</button>
-    <span class="save-pill" id="savePill">Autosave on</span>
-    ${next?`<button type="button" class="button" data-step="${next}">Next: ${escape(STEPS[idx+1].label)} →</button>`:`<button type="button" class="button lime" data-view="customer">Open customer document ↗</button>`}
+    <button type="button" class="button secondary" data-step="${prev||''}" ${prev?'':'disabled'}>Back</button>
+    <span class="save-pill" id="savePill" data-state="saved">Saved</span>
+    ${next?`<button type="button" class="button" data-step="${next}">Next: ${escape(nextName)}</button>`:`<button type="button" class="button" data-view="customer">Open customer document</button>`}
   </div>`;
 }
 function jobListHTML(){
@@ -584,16 +595,9 @@ function calc(){
 function setServerQuote(jobId,key,staff){serverQuotes[jobId]={key,staff,at:Date.now()}}
 function summaryHTML(){
   const j=activeJob(),x=calc(),owner=isOwner();
-  const warnShow=owner?x.warnings:(x.warnings||[]).filter(w=>!/below the estimated job cost|margin|profit/i.test(w));
+  const warnShow=(x.warnings||[]).filter(w=>!/below the estimated job cost|margin|profit/i.test(w));
   const alloc=quoteAllocation(x);
   const adjCap=approvedAdjustmentCap(x);
-  const ownerMini=`<div class="cost-mini"><span class="eyebrow">OWNER ONLY · INTERNAL</span>
-  <div class="summary-row"><span>Estimated job cost (raw)</span><strong>${cash(x.cost)}</strong></div>
-  <div class="summary-row"><span>Travel in quote (blended)</span><strong>${cash((x.sqft?x.travel.mileage:0)+(x.sqft?x.travel.crewTravel:0))}</strong></div>
-  <div class="summary-row"><span>Potential remainder</span><strong class="${x.profit<0?'loss':''}">${cash(x.profit)}</strong></div>
-  <div class="summary-row"><span>Estimated margin</span><strong>${num(x.margin)}%</strong></div>
-  <div class="summary-row"><span>Approved adjustment limit</span><strong>${approvedAdjustmentLabel()}</strong></div>
-  <button class="button secondary small" data-view="internal">Internal job-cost / travel →</button></div>`;
   const workerMini=`<div class="cost-mini"><span class="eyebrow">FIELD REVIEW · APPROVED PRICES</span>
   <p class="summary-note" style="margin:0 0 8px">Review scope, schedule and approved payment options. Planned hours and Materials/Labor are <b>selling-price</b> totals (markup included) — not raw cost or margin.</p>
   <div class="summary-row"><span>Planned work hours</span><strong>${num(alloc.personHours,2)} person-hr</strong></div>
@@ -625,7 +629,7 @@ function summaryHTML(){
   <p class="summary-note">${pending?'Unconfigured catalog jobs stay pending — never show a misleading $0 final as if priced.':'Quoted total is a blended customer price. Travel/mobilization (when calculated) is included in the total — not shown as a separate customer line.'}</p>
   <button class="button lime" data-step="review">Review & export ↗</button>
   <p class="summary-note">${owner?'Internal cost and margin are owner-only and never appear on customer or subcontractor documents by default.':'Internal cost, margin, and profit stay owner-only. Worker preview shows approved prices and operational review only.'}</p></div>
-  ${owner?ownerMini:workerMini}
+  ${owner?'':workerMini}
   ${authMode()?`<div class="cloud-badge on" style="margin-top:8px">SERVER ${escape(runtime.syncStatus||'connected')}</div>`:`<div class="cloud-badge off" style="margin-top:8px">CLOUD SYNC ${escape(state.cloud.status)}</div>`}
   ${warnShow.length?`<div class="notice ${owner&&x.profit<0?'error':''}">${warnShow.map(escape).join('<br/><br/>')}</div>`:''}
   <div class="notice">${authMode()?'Job data is saved to your Exotic Splash server account. Photos are stored with the job (large photos increase save time).':'Photos and job data stay in this browser. LocalStorage is limited (~5 MB typical). Export JSON backups regularly. Cloud backup is not configured.'}</div>`;
@@ -650,12 +654,15 @@ function areaMoistureHTML(a,i){
   return `<div class="moisture-panel area-moisture ${a.moisture?'on':''}">
     <div class="moisture-head"><span class="eyebrow">OPTIONAL — THIS AREA ONLY · DEFAULT OFF</span>
       <h4>Moisture-control primer / barrier</h4>
+      <p class="hint">A moisture barrier is a coating that slows water vapor rising through the concrete. Leave it off unless this slab needs it. It is not a repair for a leak.</p>
       <div class="moisture-price">${cash(rate)} / sq ft · this area est. <b>${cash(charge)}</b>${a.style==='level'?' (level-only: no moisture charge)':''}</div>
     </div>
+    <label class="check-item ${a.moisture?'active':''}"><input type="checkbox" data-path="${base}.moisture" ${a.moisture?'checked':''}><div><b>Include moisture-control primer / barrier on this area</b><div class="hint">Off means this area is not charged. On charges only this area’s finished sq ft.</div></div></label>
+    <details class="more-options"><summary>More about this option</summary><div class="detail-body">
     <p><b>Why it may be needed:</b> some slabs show elevated moisture vapor or the manufacturer system requires a moisture-oriented primer/barrier. Selecting it helps manage vapor transmission risk so a <b>compatible</b> coating system can perform as intended when testing, site inspection, or manufacturer requirements call for it.</p>
     <p><b>Benefit:</b> adds a deliberate moisture-control layer under the finish on <b>this area’s square footage only</b> — charged at the rate-book allowance when checked.</p>
     <p>It is <b>not</b> a cure-all for every moisture problem, <b>not</b> a substitute for diagnosing source / structural / plumbing issues, and <b>not</b> inferred from photos alone. Exact product and acceptance criteria must be confirmed before work.</p>
-    <label class="check-item ${a.moisture?'active':''}" style="margin-top:8px"><input type="checkbox" data-path="${base}.moisture" ${a.moisture?'checked':''}><div><b>Include moisture-control primer / barrier on this area</b><div style="font-size:10px;color:var(--muted);margin-top:4px">Unchecked = not charged for this area. Checking charges only this area’s finished sq ft.</div></div></label>
+    </div></details>
   </div>`;
 }
 function tapeGuideHTML(){
@@ -671,30 +678,37 @@ function tapeGuideHTML(){
     </ol>
   </div>`;
 }
+function areaNameInput(a,path){
+  const raw=String(a.name||'');
+  const generic=!raw.trim()||/^floor area( \d+)?$/i.test(raw.trim());
+  const placeholder=generic?(raw.trim()||'e.g. Garage floor'):'e.g. Garage floor';
+  const value=generic?'':raw;
+  return `<div class="field"><label for="f-${escape(path)}">Area name</label><input id="f-${escape(path)}" data-path="${escape(path)}" type="text" value="${escape(value)}" placeholder="${escape(placeholder)}" autocomplete="off"><small>Shown on the estimate. The gray text is only a suggestion.</small></div>`;
+}
 function areaMeasureHTML(a,i){
   const base='job.areas.'+i;
   const sqft=computeAreaSqft(a);
   const rects=(a.rectangles||[{length:0,width:0}]).map((r,ri)=>`<div class="rect-row">
     <div class="field"><label>Length (ft)</label><input data-path="${base}.rectangles.${ri}.length" type="number" min="0" step="any" inputmode="decimal" value="${escape(r.length)}"></div>
     <div class="field"><label>Width (ft)</label><input data-path="${base}.rectangles.${ri}.width" type="number" min="0" step="any" inputmode="decimal" value="${escape(r.width)}"></div>
-    <div class="rect-prod" aria-hidden="true">${num((Number(r.length)||0)*(Number(r.width)||0),1)} sf</div>
-    <button type="button" class="quiet" data-del-rect="${ri}" data-area-index="${i}" ${a.rectangles.length<=1?'disabled':''}>×</button>
+    <div class="rect-prod">${num((Number(r.length)||0)*(Number(r.width)||0),1)} sq ft</div>
+    <button type="button" class="quiet" data-del-rect="${ri}" data-area-index="${i}" ${a.rectangles.length<=1?'disabled':''} aria-label="Remove section">×</button>
   </div>`).join('');
   return `<section class="area" data-area-id="${escape(a.id)}">
     <div class="area-top"><span class="area-badge">AREA ${String(i+1).padStart(2,'0')}</span>
       ${activeJob().areas.length>1?`<button class="remove" data-remove-area="${i}" aria-label="Remove area">×</button>`:''}
     </div>
-    <div class="fields">${field('Area name',base+'.name')}${select('Sq ft entry',base+'.sqftMode',[['manual','Enter total sq ft'],['rectangles','Length × width sections (recommended)']])}</div>
-    ${tapeGuideHTML()}
-    ${a.sqftMode==='rectangles'?`<div class="measure-block"><div class="sub" style="margin-bottom:6px;font-size:11px;color:var(--muted)">Rectangular sections — add one per bay / alcove</div>${rects}<button type="button" class="quiet" data-add-rect="${i}">+ Add section</button><p class="method-note">Area total: <b>${num(sqft,2)} sq ft</b></p></div>`
-      :`<div class="fields">${field('Square feet',base+'.sqft','number','Total measured floor area for this named space.'+(computeAreaSqft(a)>20000?' square inches? divide by 144':''),'step="1" inputmode="decimal"')}</div>`}
-    ${areaMoistureHTML(a,i)}
-    <div class="divider"></div>
-    <div class="photo-measure-row">
-      <h4 style="margin:0 0 8px;font-size:13px">Area photos (estimate reference)</h4>
-      <p class="method-note" style="margin-top:0">Take or select photos on your phone here — beside measurements. Reference only; no automatic measure.</p>
+    <p class="hint">Measure in feet, wall to wall. For a rectangle, enter length and width. For an odd room, add a section for each bay and the sizes add up.</p>
+    <div class="fields">${areaNameInput(a,base+'.name')}${select('How to enter size',base+'.sqftMode',[['manual','Enter total sq ft'],['rectangles','Length × width sections']])}</div>
+    ${a.sqftMode==='rectangles'?`<div class="measure-block"><p class="hint">One row per bay or alcove.</p>${rects}<button type="button" class="quiet" data-add-rect="${i}">+ Add section</button><p class="method-note">Area total: <b>${num(sqft,2)} sq ft</b></p></div>`
+      :`<div class="fields">${field('Square feet',base+'.sqft','number','Total measured floor area for this named space.'+(computeAreaSqft(a)>20000?' Square inches? Divide by 144.':''),'step="1" inputmode="decimal"')}</div>`}
+    <details class="more-options"><summary>More options</summary><div class="detail-body">
+      ${tapeGuideHTML()}
+      ${areaMoistureHTML(a,i)}
+      <h4>Area photos (estimate reference)</h4>
+      <p class="hint">Photos are for the estimate only. They do not measure the room.</p>
       ${photoGrid(a.photos,a.id,'photos')}
-    </div>
+    </div></details>
   </section>`;
 }
 
@@ -738,9 +752,10 @@ function garagePackageHTML(j){
         ${select('Topcoat','job.garageTopcoat',[['protective','Protective (standard)'],['none','None noted'],['premium','Premium / upgraded']])}
         ${select('Concrete condition','job.garageCondition',[['unknown','Unknown / not inspected'],['good','Good'],['fair','Fair'],['poor','Poor'],['critical','Critical'],['sound','Sound / bare'],['paint','Paint / coating present'],['adhesive','Adhesive residue']])}
       </div>
-      <div class="checklist">${[['cracks','Cracks / joints'],['spalling','Spalling'],['coatingRemoval','Coating removal'],['patching','Patching'],['leveling','Leveling'],['moisture','Moisture-control primer']].map(([k,l])=>{
+      <p class="hint">Spalling means the concrete surface is flaking or crumbling.</p>
+      <div class="checklist">${[['cracks','Cracks / joints'],['spalling','Spalling (surface flaking)'],['coatingRemoval','Coating removal'],['patching','Patching'],['leveling','Leveling'],['moisture','Moisture barrier']].map(([k,l])=>{
         const on=!!(j.garagePrep&&j.garagePrep[k]);
-        return `<label class="check-item ${on?'active':''}"><input type="checkbox" data-path="job.garagePrep.${k}" ${on?'checked':''}><div><b>${escape(l)}</b><div style="font-size:10px;color:var(--muted);margin-top:4px">Changes price when a prep adjustment is configured in the price book.</div></div></label>`;
+        return `<label class="check-item ${on?'active':''}"><input type="checkbox" data-path="job.garagePrep.${k}" ${on?'checked':''}><div><b>${escape(l)}</b><div class="hint">Changes the price when that prep item has a price in the rate book.</div></div></label>`;
       }).join('')}</div>
       <p class="method-note">Photos / inspection notes: use Areas & Prep steps. Unknown condition never silently means $0.</p>`
       :`<div class="notice"><b>>3-car / measured:</b> use the guided floor measurement workflow (tape / rectangles) and existing floor rate book. Flat 1/2/3-car starting prices do <b>not</b> apply.</div>`}`;
@@ -811,25 +826,26 @@ function catalogBreakdownDocHTML(x){
 }
 
 function stepContact(j){
-  return `<section class="card">${cardHead('01','Customer & lead','Create a local job as soon as you have enough identifying info.')}
+  return `<section class="card">${cardHead('01','Customer & lead','Name, then a phone, email, or the job address.')}
   ${j.isSample?`<div class="sample-banner"><b>ILLUSTRATIVE SAMPLE DATA</b> — fictional/demo content for training. Not a live customer record.</div>`:''}
+  <div class="fields">${field('Customer name','job.customer','text','Who the quote is for')}${field('Phone','job.phone','tel','A phone, email, or the job address is enough, with the name')}${field('Email','job.email','email')}
+  <div class="field full"><label for="f-job.address">Job address</label><input id="f-job.address" data-path="job.address" type="text" value="${escape(j.address)}" placeholder="Street, city, state" autocomplete="street-address"></div></div>
+  ${contactSufficient(j)?`<div class="info-banner">This job is saved${authMode()?' to your account':''} for <b>${escape(j.customer||j.company||'this lead')}</b>.</div>`
+    :`<div class="empty-state"><h3>Start with the customer</h3><p>Enter a name and at least one of phone, email, or job address. A server job is not created until then.</p></div>`}
   <div class="palette-block"><span class="eyebrow">PROJECT TYPE</span>
-    <p class="method-note">Choose the workflow. Measured floors keep the full guided tape / prep / moisture path. Catalog types use starting-price packages (owner-configured — never invented).</p>
+    <p class="hint">Floors use the tape-measure steps. Garage, counters, and seating use package prices set by the owner.</p>
     ${projectTypePickerHTML(j)}
   </div>
-  <div class="fields">${field('Customer name','job.customer')}${field('Company','job.company')}${field('Email','job.email','email')}${field('Phone','job.phone','tel')}
-  <div class="field full"><label for="f-job.address">Full job address</label><input id="f-job.address" data-path="job.address" type="text" value="${escape(j.address)}"></div>
-  ${authMode()&&j._serverId?field('Document number','job.number','text','Assigned by the server when the job was first saved.','readonly'):field('Document number','job.number','text',authMode()?'Provisional — the server assigns the final number on first save.':'')}${field('Document date','job.date','date')}</div>
-  ${contactSufficient(j)?`<div class="info-banner">Local job <b>${escape(j.id)}</b> is active. Created ${escape((j.createdAt||'').replace('T',' ').slice(0,19))} (UTC). Autosave keeps updates on this device.</div>`
-    :`<div class="empty-state"><h3>Waiting for lead details</h3><p>Enter a name (or company) plus phone, email, or address to create the persistent local job record.</p></div>`}
-  <div class="divider"></div>
-  <h4 style="margin:0 0 8px;font-size:13px">Jobs on this device</h4>
-  ${jobListHTML()}
-  <div class="inline-actions">
-    <button type="button" class="button secondary" id="newJobKeep">+ New job (keeps current)</button>
-    <button type="button" class="button secondary" id="sampleIllustrative">Load illustrative sample ↗</button>
-  </div>
-  <p class="route-disclosure">New job never silently erases another. Use Backup/Export for long-term copies. Resetting the browser site data will clear local jobs.</p>
+  <details class="more-options"><summary>More options</summary><div class="detail-body">
+    <div class="fields">${field('Company','job.company')}${authMode()&&j._serverId?field('Document number','job.number','text','Assigned by the server when the job was first saved.','readonly'):field('Document number','job.number','text',authMode()?'Provisional — the server assigns the final number on first save.':'')}${field('Document date','job.date','date')}</div>
+    <h4>Jobs on this device</h4>
+    ${jobListHTML()}
+    <div class="inline-actions">
+      <button type="button" class="button secondary" id="newJobKeep">+ New job (keeps current)</button>
+      <button type="button" class="button secondary" id="sampleIllustrative">Load illustrative sample</button>
+    </div>
+    <p class="route-disclosure">New job never erases another. Use Backup for a copy. Clearing this browser’s site data removes local jobs.</p>
+  </div></details>
   </section>`;
 }
 function stepAreas(j){
@@ -860,8 +876,8 @@ function stepAreas(j){
     ${seatingItemsHTML(j)}
     </section>`;
   }
-  return `<section class="card">${cardHead('02','Areas, measurements & photos','Tape measure · sections · per-area moisture · photos')}
-  <div class="notice">Measure with a tape in feet. Use length × width sections for irregular rooms. Photos are reference only — no automatic measurement or camera diagnosis. Moisture-control primer is optional per area (default OFF).</div>
+  return `<section class="card">${cardHead('02','Areas, measurements & photos','Size each floor. Photos and moisture barrier are optional.')}
+  <p class="hint">Use a tape, in feet. Photos do not measure the room. The moisture barrier stays off until you turn it on for an area.</p>
   ${j._moistureLegacyReview&&j._moistureLegacyReview.needed?`<div class="warn-banner"><b>${escape(j._moistureLegacyReview.label)}</b> — ${escape(j._moistureLegacyReview.detail)}</div>`:''}
   <div id="areas">${j.areas.map(areaMeasureHTML).join('')}</div>
   <p class="method-note">Moisture selected on ${moist.items.length} area(s): <b>${num(moist.sqft)} sq ft</b> × ${cash(moist.rate)} = <b>${cash(moist.total)}</b></p>
@@ -897,26 +913,29 @@ function stepPrep(j){
     const base='job.areas.'+i;
     return `<section class="area"><div class="area-top"><span class="area-badge">${escape(a.name||('Area '+(i+1)))}</span><small>${num(computeAreaSqft(a))} sq ft</small></div>
       ${areaMoistureHTML(a,i)}
-      <label style="font-size:11px;font-weight:600;color:#52645c">Condition rating</label>
+      <label class="field-label">Condition rating</label>
       <div class="rating-row" style="margin:8px 0 14px">${CONDITION_RATINGS.map(r=>`<button type="button" class="rating-btn ${a.conditionRating===r.id?'active':''}" data-rating="${r.id}" data-area-index="${i}">${escape(r.label)}</button>`).join('')}</div>
       <div class="checklist">${PREP_ITEMS.map(item=>{
         const on=!!(a.prep&&a.prep[item.key]);
-        return `<label class="check-item ${on?'active':''}"><input type="checkbox" data-path="${base}.prep.${item.key}" ${on?'checked':''}><div><b>${escape(item.label)}</b><div style="font-size:10px;color:var(--muted);margin-top:4px">${escape(item.help)}</div></div></label>`;
+        return `<label class="check-item ${on?'active':''}"><input type="checkbox" data-path="${base}.prep.${item.key}" ${on?'checked':''}><div><b>${escape(item.label)}</b><div class="hint">${escape(item.help)}</div></div></label>`;
       }).join('')}</div>
-      <div class="fields" style="margin-top:12px">
+      <details class="more-options"><summary>More options</summary><div class="detail-body">
+      <div class="fields">
         ${(a.prep&&(a.prep.patching||a.prep.spalling))?field('Patch kits (this area)',base+'.prep.patchKits','number','Links to patch rate in rate book','step="1"'):''}
         ${(a.prep&&a.prep.leveling)?field('Avg leveling depth (in)',base+'.prep.levelDepth','number','¼ inch = 0.25. Maximum 2 inches.','min="0" max="2" step="0.125" inputmode="decimal"'):''}
-        ${checkbox('Adhesive residue (vs paint)',base+'.prep.adhesive')}
+        ${checkbox('Adhesive residue (glue left on the floor, not paint)',base+'.prep.adhesive')}
       </div>
-      ${textArea('Inspection notes / concerns',base+'.conditionNotes','Append-only job history also captures significant changes.')}
-      <h4 style="margin:12px 0 8px;font-size:13px">Condition photos</h4>
+      ${textArea('Inspection notes / concerns',base+'.conditionNotes','Also kept in the job history when the concern changes.')}
+      <h4>Condition photos</h4>
       ${photoGrid(a.conditionPhotos,a.id,'conditionPhotos')}
+      </div></details>
     </section>`;
   }).join('')}
+  <details class="more-options"><summary>More options</summary><div class="detail-body">
   ${textArea('Job-level issues / concerns','job.jobConcerns','Stored on the job and copied into history when changed.')}
-  <div class="divider"></div>
-  <h4 style="margin:0 0 8px;font-size:13px">Change history (append-only)</h4>
+  <h4>Change history</h4>
   <div class="history-list">${(j.history||[]).slice().reverse().slice(0,30).map(h=>`<div><b>${escape(h.type)}</b> · ${escape((h.at||'').replace('T',' ').slice(0,19))} UTC<br/>${escape(h.summary)}${h.detail?' — '+escape(h.detail):''}</div>`).join('')||'<div class="empty-state">No history yet. Edits will appear here.</div>'}</div>
+  </div></details>
   </section>`;
 }
 function colorPaletteHTML(a,i){
@@ -966,10 +985,12 @@ function stepSelections(j){
         ${a.style!=='level'?select('Topcoat',base+'.topcoat',[['protective','Protective topcoat (standard allowance)'],['none','No separate topcoat note']]):''}
         ${rateOverrideField(a,base)}
       </div>
+      <details class="more-options"><summary>More options</summary><div class="detail-body">
       ${a.style!=='level'?`<div class="area-options">${checkbox('Slip-resistant texture',base+'.grip')}${checkbox('Self-leveling before finish',base+'.level')}</div>`:''}
       ${(a.level||a.style==='level'||(a.prep&&a.prep.leveling))?`<div class="fields depth-row">${field('Average leveling depth (inches)',base+'.depth','number','Verify average, not deepest spot. Maximum 2 inches.','min="0" max="2" step="0.125" inputmode="decimal"')}</div>`:''}
-      ${a.grip?field('Texture note (optional)',base+'.textureNote','text','Describe additive / texture intent — not a slip guarantee'):''}
-      ${a.moisture?`<p class="method-note">Moisture-control primer/barrier is ON for this area (${num(computeAreaSqft(a))} sq ft).</p>`:''}
+      ${a.grip?field('Texture note (optional)',base+'.textureNote','text','Describe the texture you want. This is not a promise the floor will not be slippery.'):''}
+      ${a.moisture?`<p class="method-note">Moisture barrier is on for this area (${num(computeAreaSqft(a))} sq ft).</p>`:''}
+      </div></details>
     </section>`;
   }).join('')}
   </section>`;
@@ -1130,48 +1151,65 @@ function equipmentPlan(j,x){
   if(E.n(j.patchKits)||j.areas.some(a=>a.prep&&(a.prep.patching||a.prep.spalling)))items.push('Concrete patch kits');
   return items;
 }
+function ownerViewHTML(){
+  if(!isOwner())return '';
+  const x=calc();
+  const warnShow=(x.warnings||[]).filter(w=>/below the estimated job cost|margin|profit/i.test(w));
+  return `<details class="owner-view"><summary>Owner view</summary><div class="detail-body">
+    <p class="hint">Cost, margin, and profit stay in this section. They are left off the customer and subcontractor documents.</p>
+    <div class="cost-mini"><span class="eyebrow">OWNER ONLY · INTERNAL</span>
+      <div class="summary-row"><span>Estimated job cost</span><strong>${cash(x.cost)}</strong></div>
+      <div class="summary-row"><span>Travel included in the quote</span><strong>${cash((x.sqft?x.travel.mileage:0)+(x.sqft?x.travel.crewTravel:0))}</strong></div>
+      <div class="summary-row"><span>Potential remainder</span><strong class="${x.profit<0?'loss':''}">${cash(x.profit)}</strong></div>
+      <div class="summary-row"><span>Estimated margin</span><strong>${num(x.margin)}%</strong></div>
+      <div class="summary-row"><span>Approved adjustment limit</span><strong>${approvedAdjustmentLabel()}</strong></div>
+      <button type="button" class="button secondary" data-view="internal">Internal job-cost and travel</button>
+    </div>
+    ${warnShow.length?`<div class="notice ${x.profit<0?'error':''}">${warnShow.map(escape).join('<br/><br/>')}</div>`:''}
+  </div></details>`;
+}
 function stepPricing(j){
   const x=calc();
   const moist=moistureSelectedAreas(j);
   const catalog=isCatalogJob(j);
-  return `<section class="card">${cardHead('05','Customer pricing & payments','Options · add-in · terms — travel stays internal / blended')}
+  const tierChoices=catalog?[['regular','Regular (catalog starting + adjustments)']]:[['regular','Regular · full price'],['opt1','Option 1 · bank transfer'],['opt2','Option 2 · scheduled payments']];
+  return `<section class="card">${cardHead('05','Customer pricing & payments','Pick one price. Travel stays inside the total.')}
   ${priceNeededBanner(x)}
-  ${catalog?`<div class="notice"><b>Catalog package pricing:</b> family per-sq-ft options apply to measured floor jobs. Package jobs use configured starting price + itemized adjustments (Regular). Material/topcoat/condition adjustments must be configured to affect price — not description only.</div>${catalogBreakdownDocHTML(x)}`:`<div id="optionCards" class="option-grid">${optionCardsHTML(x)}</div>`}
-  <div class="fields three">${select('Selected price','job.priceOption',catalog?[['regular','Regular (catalog starting + adjustments)']]:[['regular','Regular · 7 / 10 / 15'],['opt1','Option 1 · bank transfer 5 / 8 / 11'],['opt2','Option 2 · 6 / 9 / 13']])}${select('Document type','job.docType',[['estimate','Estimate'],['invoice','Invoice']])}${field('Customer sales tax (%)','job.tax','number')}</div>
-  ${checkbox('Show all pricing options on the customer document','job.showOptions')}
-  <div class="divider"></div>
-  ${checkbox('Include standard property / trip add-in','job.addOnIncluded')}
-  <p class="method-note">The $1 / sq ft property add-in is off on a new estimate until this box is checked. It is then its own line, not part of the finish rate. It is not a material surcharge.</p>
-  <div class="fields">${select('Add-in rate','job.addOnTier',[['low','$'+E.n(state.settings.addOn.low).toFixed(2)+' / sq ft (standard)'],['high','$'+E.n(state.settings.addOn.high).toFixed(2)+' / sq ft']],'Used only when the add-in box is checked. A new estimate leaves that box off.')}
-  ${select('Customer pricing method','job.method',[['rates','Customer rates per square foot'],['cost','Estimated cost + markup'],['agreed','Agreed total / manual quote']])}
-  ${(()=>{const owner=isOwner();if(j.method==='cost')return owner?field('Markup on estimated cost (%)','job.markup','number'):lockedField('Markup on estimated cost (%)','job.markup','number','Owner-only');if(j.method==='agreed')return owner?field('Agreed total before discount / tax','job.agreedTotal','number'):lockedField('Agreed total before discount / tax','job.agreedTotal','number','Owner-only');return '';})()}
-  ${catalog?'':discountRequestHTML(j,x)}
-  ${quoteAllocationHTML(x)}
-  ${j.docType==='invoice'?field('Payments received ($)','job.paid','number'):''}
-  </div>
-  <p class="method-note">Family option rates replace the finish-area rate only. Leveling, removal, patching, moisture, and property add-in stay at normal amounts. Travel is calculated from the job address (Internal) and <b>blended into the customer total</b> — not listed as a separate customer line.</p>
-  <p class="method-note">Moisture on ${moist.items.length} area(s): ${num(moist.sqft)} sq ft → ${cash(moist.total)}.</p>
-  ${travelBlendedNote(x)}
-  <div class="fields pricing-extra">${textArea('Scheduling & payment terms','job.terms')}${textArea('Extra project notes / exclusions','job.notes')}</div>
-  <div class="info-banner">Travel, crew size, ${isOwner()?'mileage rate ($'+E.n(state.settings.costs.mile).toFixed(2)+'), ':''}and equipment planning are under <b>Internal job-cost</b> (advanced). Customer pricing page stays clear of that clutter.</div>
+  ${catalog?`<div class="notice"><b>Package pricing.</b> Garage, counter, and seating jobs use the configured starting price plus adjustments. The three floor prices are for measured floors.</div>${catalogBreakdownDocHTML(x)}`
+    :`<p class="hint">Regular is the full price. Option 1 is lower when the customer pays by bank transfer: half to book the job, half at the final walkthrough. Option 2 is in between and splits into three payments — half, then 25%, then the last 25% within 14 days. Choose one. They do not combine.</p>
+    <div id="optionCards" class="option-grid">${optionCardsHTML(x)}</div>`}
+  <div class="fields">${select('Selected price','job.priceOption',tierChoices)}</div>
+  ${catalog?'':discountRequestHTML(j)}
+  <details class="more-options"><summary>More options</summary><div class="detail-body">
+    <div class="fields">${select('Document type','job.docType',[['estimate','Estimate'],['invoice','Invoice']])}${field('Customer sales tax (%)','job.tax','number')}</div>
+    ${checkbox('Show all pricing options on the customer document','job.showOptions')}
+    <div class="divider"></div>
+    ${checkbox('Include standard property / trip add-in','job.addOnIncluded')}
+    <p class="hint">The property add-in is $1 per sq ft and stays off until you check this. It is its own line, not part of the finish price.</p>
+    <div class="fields">${select('Add-in rate','job.addOnTier',[['low','$'+E.n(state.settings.addOn.low).toFixed(2)+' / sq ft (standard)'],['high','$'+E.n(state.settings.addOn.high).toFixed(2)+' / sq ft']],'Used only when the add-in box is checked.')}
+    ${select('Customer pricing method','job.method',[['rates','Customer rates per square foot'],['cost','Estimated cost + markup'],['agreed','Agreed total / manual quote']])}
+    ${(()=>{const owner=isOwner();if(j.method==='cost')return owner?field('Markup on estimated cost (%)','job.markup','number'):lockedField('Markup on estimated cost (%)','job.markup','number','Owner-only');if(j.method==='agreed')return owner?field('Agreed total before discount / tax','job.agreedTotal','number'):lockedField('Agreed total before discount / tax','job.agreedTotal','number','Owner-only');return '';})()}
+    </div>
+    ${quoteAllocationHTML(x)}
+    ${j.docType==='invoice'?field('Payments received ($)','job.paid','number'):''}
+    <p class="method-note">Leveling, removal, patching, moisture, and the property add-in stay at their own prices. Travel is included in the total, not a separate line for the customer.</p>
+    <p class="method-note">Moisture on ${moist.items.length} area(s): ${num(moist.sqft)} sq ft → ${cash(moist.total)}.</p>
+    ${travelBlendedNote(x)}
+    <div class="fields pricing-extra">${textArea('Scheduling & payment terms','job.terms')}${textArea('Extra project notes / exclusions','job.notes')}</div>
+    <div class="info-banner">Crew size, drive time, ${isOwner()?'mileage rate ($'+E.n(state.settings.costs.mile).toFixed(2)+'), ':''}and equipment planning are under <b>Internal plan</b> in the menu.</div>
+  </div></details>
+  ${ownerViewHTML()}
   </section>`;
 }
 
 function stepReview(j){
   const x=calc(),owner=isOwner();
   const totalDisp=x.quoteReady?cash(x.total):'Pending';
-  const metrics=owner
-    ?`<div class="metrics">
-    <div class="metric"><span>Customer total</span><strong class="${x.quoteReady?'':'pending-total'}">${totalDisp}</strong><small>${escape(x.selected.short)}${x.quoteReady?'':' · incomplete'}</small></div>
+  const metrics=`<div class="metrics">
+    <div class="metric"><span>${owner?'Customer total':'Approved customer total'}</span><strong class="${x.quoteReady?'':'pending-total'}">${totalDisp}</strong><small>${escape(x.selected.short)}${x.quoteReady?'':' · incomplete'}</small></div>
     <div class="metric"><span>Sq ft / items</span><strong>${num(x.sqft)||(j.catalogItems||[]).length||'—'}</strong><small>${isCatalogJob(j)?'catalog':'floor'} · ${j.areas.length} area(s)</small></div>
-    <div class="metric"><span>Internal cost</span><strong>${x.quoteReady?cash(x.cost):'—'}</strong><small>Owner-only · not on customer/sub docs</small></div>
-    <div class="metric"><span>Margin</span><strong>${x.quoteReady?num(x.margin)+'%':'—'}</strong><small>Owner-only</small></div>
-  </div>`
-    :`<div class="metrics">
-    <div class="metric"><span>Approved customer total</span><strong class="${x.quoteReady?'':'pending-total'}">${totalDisp}</strong><small>${escape(x.selected.short)}</small></div>
-    <div class="metric"><span>Sq ft / items</span><strong>${num(x.sqft)||(j.catalogItems||[]).length||'—'}</strong><small>${j.areas.length} area(s)</small></div>
     <div class="metric"><span>Payment option</span><strong>${escape(x.selected.label)}</strong><small>Approved terms only</small></div>
-    ${authMode()?`<div class="metric"><span>Server check</span><strong>${x._server?'Verified':'Pending'}</strong><small>${x._server?'Totals from server':'Waiting for server'}</small></div>`:'<div class="metric"><span>Cloud</span><strong>OFF</strong><small>Not configured</small></div>'}
+    ${authMode()?`<div class="metric"><span>Server check</span><strong>${x._server?'Verified':'Pending'}</strong><small>${x._server?'Totals from server':'Waiting for server'}</small></div>`:(owner?'':'<div class="metric"><span>Cloud</span><strong>OFF</strong><small>Not configured</small></div>')}
   </div>`;
   const reviewBanner=owner
     ?`<div class="info-banner"><b>Owner review:</b> confirm scope, schedule, approved payment options, and (privately) cost/margin. Profit and margin stay off customer/subcontractor documents.</div>`
@@ -1183,6 +1221,7 @@ function stepReview(j){
   ${reviewBanner}
   ${x.quoteReady||(x.blockingIssues||[]).length?'':`<div class="warn-banner"><b>Finalized quote blocked</b> until required starting prices and adjustments are configured. Do not present Pending as a $0 customer total.</div>`}
   ${metrics}
+  ${ownerViewHTML()}
   <div class="inline-actions"><button type="button" class="button" id="saveAsIssued" ${(x.blockingIssues||[]).length||((x.sanity&&x.sanity.warnings||[]).length&&!ownerAcked(j,x.sanity.warnings))?'disabled':''}>Save as issued</button></div>
   ${(x.blockingIssues||[]).length?'<p class="method-note">Save as issued, issuing, and customer links stay off until the price is fixed. The draft still saves and is marked needs fixing.</p>':''}
   ${quoteAllocationHTML(x)}
@@ -1217,8 +1256,8 @@ function guidedView(){
   const step=STEPS.some(s=>s.id===j.step)?j.step:'contact';
   j.step=step;
   const body={contact:stepContact,areas:stepAreas,prep:stepPrep,selections:stepSelections,pricing:stepPricing,review:stepReview}[step](j);
-  return heading('FIELD ESTIMATING','Guided job walkthrough.','Lead → measure → inspect → select → price → export.','<button class="button secondary" id="sampleIllustrativeTop">Illustrative sample ↗</button>')
-    +wizardRail(j)+`<div class="layout"><div class="stack">${body}${navFooter(j)}</div><aside class="summary" id="liveSummary">${summaryHTML()}</aside></div>`;
+  return `<div class="page-head guided-intro"><div><span class="eyebrow">FIELD ESTIMATING</span><h1>Guided job walkthrough.</h1><p>Lead → measure → inspect → select → price → export.</p></div><button class="button secondary" id="sampleIllustrativeTop">Illustrative sample</button></div>`
+    +wizardRail(j)+`<div class="layout" data-wizard-step="${escape(step)}"><div class="stack">${body}${navFooter(j)}</div><aside class="summary" id="liveSummary">${summaryHTML()}</aside></div>`;
 }
 function cField(label,key,help=''){return field(label,'settings.costs.'+key,'number',help)}
 function ratesView(){
@@ -1772,9 +1811,11 @@ function render(){
   document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active',b.dataset.view===v));
   $('breadcrumb').textContent='Guided / '+({guided:'Field workflow',rates:'Costs & pricing',customer:'Customer document',guide:'Install guide',subcontractor:'Subcontractor',internal:'Internal job-cost',jobs:'Job list',staff:'Staff access',approvals:'Discount approvals'}[v]);
   const map={guided:guidedView,rates:ratesView,customer:customerView,guide:guideView,subcontractor:subView,internal:internalView,jobs:jobsView,staff:()=>runtime.staffViewHTML?runtime.staffViewHTML():'',approvals:()=>runtime.approvalsViewHTML?runtime.approvalsViewHTML():''};
+  const openFlags=window.EsMobileUX&&window.EsMobileUX.captureOpen?window.EsMobileUX.captureOpen():null;
   $('main').innerHTML=map[v]();
   updateLive();
   save({silent:true});
+  if(window.EsMobileUX&&window.EsMobileUX.afterRender)window.EsMobileUX.afterRender(openFlags);
 }
 function updateLive(){
   const x=calc();
@@ -1955,7 +1996,21 @@ document.addEventListener('input',e=>{
   const prev=getPath(path);
   setPath(path,val);
   if(path.includes('job.areas')&&(path.endsWith('.length')||path.endsWith('.width')||path.endsWith('.sqftMode'))){
-    const m=path.match(/job\.areas\.(\d+)/);if(m)syncAreaSqft(activeJob().areas[Number(m[1])]);
+    const m=path.match(/job\.areas\.(\d+)/);
+    if(m){
+      const area=activeJob().areas[Number(m[1])];
+      syncAreaSqft(area);
+      const row=t.closest&&t.closest('.rect-row');
+      if(row){
+        const len=row.querySelector('[data-path$=".length"]');
+        const wid=row.querySelector('[data-path$=".width"]');
+        const prod=row.querySelector('.rect-prod');
+        if(prod)prod.textContent=num((Number(len&&len.value)||0)*(Number(wid&&wid.value)||0),1)+' sq ft';
+      }
+      const block=t.closest&&t.closest('.measure-block');
+      const note=block&&block.querySelector('.method-note');
+      if(note)note.innerHTML='Area total: <b>'+num(area.sqft,2)+' sq ft</b>';
+    }
   }
   if(path.includes('job.catalogItems')&&(path.endsWith('.length')||path.endsWith('.width'))){
     const m=path.match(/job\.catalogItems\.(\d+)/);
@@ -2010,11 +2065,13 @@ document.addEventListener('click',e=>{
   if(t.dataset.garagePackage){activeJob().garagePackage=t.dataset.garagePackage;render();return}
   if(t.dataset.removeCatalog!==undefined){activeJob().catalogItems.splice(Number(t.dataset.removeCatalog),1);render();return}
   switch(t.id){
-    case'addArea':activeJob().areas.push(guidedArea({name:'Floor area '+(activeJob().areas.length+1)}));render();break;
+    case'addArea':activeJob().areas.push(guidedArea({sqftMode:'rectangles'}));render();break;
     case'addFlatItem':activeJob().catalogItems.push(E.newFlatItem());render();break;
     case'addSeatItem':activeJob().catalogItems.push(E.newSeatItem());render();break;
     case'newJob':case'newJobKeep':case'newJobKeep2':{
-      const j=guidedJob();if(authMode())j._local=true;j.origin=state.settings.business.address;state.jobs.push(j);state.activeJobId=j.id;goStep('contact');toast('New empty job created — previous jobs kept.');break;}
+      const j=guidedJob();if(authMode())j._local=true;j.origin=state.settings.business.address;
+      for(const a of j.areas)if(!(Number(a.sqft)>0))a.sqftMode='rectangles';
+      state.jobs.push(j);state.activeJobId=j.id;goStep('contact');toast(authMode()?'New job started. It is saved on the server after a name and a phone, email, or address.':'New job started. Previous jobs stay on this device.');break;}
     case'sampleIllustrative':case'sampleIllustrativeTop':loadIllustrativeSample();break;
     case'backup':case'backup2':doBackup();break;
     case'shareBackup':shareBackup();break;

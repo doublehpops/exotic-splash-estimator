@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#163d37">
 <meta name="referrer" content="no-referrer">
 <meta name="robots" content="noindex,nofollow">
@@ -10,6 +10,7 @@
 <meta name="description" content="Exotic Splash staff estimator. Staff sign-in; pricing enforced by the server.">
 <link rel="stylesheet" href="css/app.css">
 <link rel="stylesheet" href="css/auth.css">
+<link rel="stylesheet" href="css/mobile.css">
 </head>
 <body>
 <div id="gate" class="gate" aria-live="polite"><p class="gate-loading" data-gate-state="loading">Loading…</p></div>
@@ -17,7 +18,12 @@
 <div id="modeBanner" class="mode-banner" role="alert" hidden></div>
 <div class="app-shell">
 <aside class="sidebar">
-  <a class="brand" href="#"><span class="brand-mark">es<span>↗</span></span><span>EXOTIC SPLASH<small>GUIDED ESTIMATOR v7</small></span></a>
+  <div class="sidebar-top">
+    <button type="button" class="menu-toggle" id="menuToggle" aria-expanded="false" aria-controls="nav"><span class="menu-bars" aria-hidden="true"></span><span>Menu</span></button>
+    <a class="brand" href="#"><span class="brand-mark">es<span>↗</span></span><span>EXOTIC SPLASH<small>GUIDED ESTIMATOR v7</small></span></a>
+    <span class="save-pill" id="savePillHeader" role="status" data-state="saved">Saved</span>
+    <button type="button" class="quiet icon-btn" id="replayWalkthrough" aria-label="Replay the introduction">?</button>
+  </div>
   <div class="side-label">WORKSPACE</div>
   <nav id="nav">
     <button data-view="guided" class="active">▦ <span>Guided workflow</span></button>
@@ -77,6 +83,7 @@
 <script src="js/es-config.js"></script>
 <script src="js/es-cloud.js"></script>
 <script src="js/guided-app.js"></script>
+<script src="js/mobile-ux.js"></script>
 <script src="js/es-gate.js"></script>
 </body>
 </html>
