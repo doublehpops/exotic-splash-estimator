@@ -183,6 +183,18 @@ function guidedJob(base){
   j.garagePrep=Object.assign({cracks:false,crackLf:0,spalling:false,coatingRemoval:false,paintRemoval:false,patching:false,leveling:false,moisture:false},j.garagePrep||{});
   if(E.blankExtras)j.extras=Object.assign(E.blankExtras(),j.extras||{});
   j.catalogItems=Array.isArray(j.catalogItems)?j.catalogItems:[];
+  j.sectionLabel=String(raw.sectionLabel||'');
+  j.sections=Array.isArray(raw.sections)?raw.sections.filter(s=>s&&typeof s==='object'&&!Array.isArray(s)).map(s=>{
+    const t=Object.assign(E.newSection(s.projectType||'floor'),s);
+    t.areas=(Array.isArray(s.areas)&&s.areas.length?s.areas:[E.newArea()]).map(guidedArea);
+    t.catalogItems=Array.isArray(s.catalogItems)?s.catalogItems:[];
+    if(E.blankExtras)t.extras=Object.assign(E.blankExtras(),s.extras||{});
+    t.garagePrep=Object.assign({cracks:false,crackLf:0,spalling:false,coatingRemoval:false,paintRemoval:false,patching:false,leveling:false,moisture:false},s.garagePrep||{});
+    t.label=String(s.label||'');
+    t.address=String(s.address||'');
+    t.projectType=['floor','garage','flatwork','seating'].includes(s.projectType)?s.projectType:'floor';
+    return t;
+  }):[];
   // v5/v6: moisture is PER-AREA only. Job-global moistureBarrier / job.moisture do NOT charge.
   // Historical area prep.moisture / a.moisture retained via guidedArea.
   const areaHadMoisture=(j.areas||[]).some(a=>a.moisture||(a.prep&&a.prep.moisture));
@@ -587,6 +599,8 @@ function stripCosts(x){
   y.hours=(x.hours||[]).map(h=>({label:h.label,qty:E.n(h.qty)}));
   y.overheadItems=[];
   y.lines=(x.lines||[]).filter(l=>!['mileage','travel','equipment','overhead','equip'].includes(l.kind||''));
+  if(Array.isArray(y.sections))y.sections=y.sections.map(s=>{const c=Object.assign({},s);delete c.cost;delete c.profit;delete c.margin;return c});
+  delete y.unpricedExtras;
   return y;
 }
 function overlayServer(x,s){
@@ -627,11 +641,12 @@ function summaryHTML(){
   <div class="summary-row"><span>Applied adjustment</span><strong>${cash(E.n(j.discount))}</strong></div>
   <button class="button secondary small" data-view="internal">Field plan / travel →</button></div>`;
   const blocked=(x.blockingIssues||[]).length>0;
-  const catalogPending=isCatalogJob(j)&&!x.quoteReady&&!blocked;
-  const floorIncomplete=!isCatalogJob(j)&&!x.sqft;
-  const pending=catalogPending;
+  const catalogPending=isCatalogJob(j)&&!x.quoteReady&&!blocked&&!x.multi;
+  const multiPending=!!(x.multi&&!x.quoteReady&&!blocked);
+  const floorIncomplete=!isCatalogJob(j)&&!x.sqft&&!x.multi;
+  const pending=catalogPending||multiPending;
   const typeLabel={floor:'Measured floors',garage:'Garage',flatwork:'Tables / counters / bars',seating:'Chairs / stools'}[j.projectType]||j.projectType;
-  const totalBlock=catalogPending
+  const totalBlock=(catalogPending||multiPending)
     ?`<div class="big-total pending-total">Pending</div><div class="per-sqft">Starting price needed · not a finalized quote</div>`
     :floorIncomplete
       ?`<div class="big-total">${cash(x.total)}</div><div class="per-sqft">Add measurements to calculate</div>`
@@ -644,7 +659,8 @@ function summaryHTML(){
   ${blocked?priceNeededBanner(x):''}
   ${continueBtn}${employeeNote}
   ${catalogPending?priceNeededBanner(x):''}
-  ${[['Project type',escape(typeLabel)],['Price',escape(x.selected.short)],...(x.selected.key!=='regular'&&!pending?[['Below the regular full total',cash(x.selected.savings)+' ('+num(x.selected.savingsPct)+'% of that full total)']]:[]),['Property add-in',x.addOn.included?cash(x.addOn.total)+' @ '+cash(x.addOn.rate)+'/sq ft':'Not included'],['Areas / items',isCatalogJob(j)?String((j.catalogItems||[]).length||(j.projectType==='garage'?1:0)):j.areas.length],['Moisture areas',String((moistureSelectedAreas(j).items||[]).length)],['Cloud','OFF']].map(([k,v])=>`<div class="summary-row"><span>${k}</span><strong>${v}</strong></div>`).join('')}
+  ${[['Project type',escape(x.multi&&x.sections?'Whole quote · '+x.sections.length+' projects':typeLabel)],['Price',escape(x.selected.short)],...(x.selected.key!=='regular'&&!pending?[['Below the regular full total',cash(x.selected.savings)+' ('+num(x.selected.savingsPct)+'% of that full total)']]:[]),['Property add-in',x.addOn.included?cash(x.addOn.total)+' @ '+cash(x.addOn.rate)+'/sq ft':'Not included'],['Areas / items',isCatalogJob(j)?String((j.catalogItems||[]).length||(j.projectType==='garage'?1:0)):j.areas.length],['Moisture areas',String((moistureSelectedAreas(j).items||[]).length)],['Cloud','OFF']].map(([k,v])=>`<div class="summary-row"><span>${k}</span><strong>${v}</strong></div>`).join('')}
+  ${x.sections&&x.sections.length>1?x.sections.map(s=>`<div class="summary-row"><span>${escape(s.label)}${s.address?' · '+escape(s.address):''}</span><strong>${s.quoteReady?cash(s.subtotal):'Pending'}</strong></div>`).join('')+'<div class="summary-row"><span>Grand total</span><strong>'+(x.quoteReady?cash(x.total):'Pending')+'</strong></div>':''}
   <p class="summary-note">${pending?'Unconfigured catalog jobs stay pending — never show a misleading $0 final as if priced.':'Quoted total is a blended customer price. Travel/mobilization (when calculated) is included in the total — not shown as a separate customer line.'}</p>
   <button class="button lime" data-step="review">Review & export ↗</button>
   <p class="summary-note">${owner?'Internal cost and margin are owner-only and never appear on customer or subcontractor documents by default.':'Internal cost, margin, and profit stay owner-only. Worker preview shows approved prices and operational review only.'}</p></div>
@@ -892,6 +908,78 @@ function catalogBreakdownDocHTML(x){
     <div class="grand"><span>Final total ${x.quoteReady?'':' (pending)'}</span><span>${x.quoteReady?cash(x.total):'Pending — starting price needed'}</span></div></div>`;
 }
 
+function sectionInputsHTML(s,base,i){
+  const type=s.projectType||'floor';
+  if(type==='garage'){
+    return `<div class="fields">
+      ${select('Garage package',base+'.garagePackage',[['1car','1-car package'],['2car','2-car package'],['3car','3-car package'],['measured','Measured sq ft']])}
+      ${select('Material / system',base+'.garageStyle',[['solid','Solid'],['flake','Flake'],['metallic','Metallic']])}
+      ${select('Topcoat',base+'.garageTopcoat',[['protective','Protective (standard)'],['none','None'],['premium','Premium / upgraded']])}
+      ${select('Concrete condition',base+'.garageCondition',[['good','Good — base price'],['fair','Fair'],['poor','Poor'],['unknown','Unknown / not inspected'],['critical','Critical']])}
+    </div>
+    <p class="method-note">A good slab and a simple pour use the package price. Fair, poor, and premium topcoat add on when those prices are set.</p>
+    ${optionalExtrasHTML(s,base)}`;
+  }
+  if(type==='flatwork'){
+    const items=s.catalogItems||[];
+    return items.map((it,ii)=>{
+      const p=base+'.catalogItems.'+ii;
+      return `<div class="fields">
+        ${field('Item name',p+'.name','text','Table, counter, or bar')}
+        ${select('Kind',p+'.kind',[['countertop','Countertop'],['table','Table'],['bar','Bar top'],['other','Other']])}
+        ${field('Length (ft)',p+'.length','number')}
+        ${field('Width (ft)',p+'.width','number')}
+        ${select('Material',p+'.style',[['solid','Solid'],['flake','Flake'],['metallic','Metallic']])}
+        ${select('Condition',p+'.condition',[['good','Good — base price'],['fair','Fair'],['poor','Poor'],['unknown','Unknown / not inspected']])}
+        ${field('Starting price ($)',p+'.customStarting','number','Blank uses the size-band price when the owner has set one.')}
+      </div>`;
+    }).join('')+`<button type="button" class="quiet" data-add-section-item="${i}">+ Add a table, counter, or bar</button>${optionalExtrasHTML(s,base)}`;
+  }
+  if(type==='seating'){
+    const items=s.catalogItems||[];
+    return items.map((it,ii)=>{
+      const p=base+'.catalogItems.'+ii;
+      return `<div class="fields">
+        ${field('Item name',p+'.name')}
+        ${select('Type',p+'.seatType',[['chair','Chair'],['stool','Stool'],['other','Other']])}
+        ${field('Quantity',p+'.qty','number','','step="1"')}
+        ${select('Material',p+'.style',[['solid','Solid'],['flake','Flake'],['metallic','Metallic']])}
+        ${select('Condition',p+'.condition',[['good','Good — base price'],['fair','Fair'],['poor','Poor'],['unknown','Unknown / not inspected']])}
+        ${field('Starting price each ($)',p+'.customStarting','number','Blank uses the price-book price for this type.')}
+      </div>`;
+    }).join('')+`<button type="button" class="quiet" data-add-section-item="${i}">+ Add seating</button>${optionalExtrasHTML(s,base)}`;
+  }
+  const areas=s.areas||[];
+  return areas.map((a,ai)=>{
+    const p=base+'.areas.'+ai;
+    return `<div class="fields">${field('Area name',p+'.name')}${field('Square feet',p+'.sqft','number')}${select('System',p+'.style',[['solid','Solid'],['flake','Flake'],['metallic','Metallic']])}</div>`;
+  }).join('')+`<button type="button" class="quiet" data-add-section-area="${i}">+ Add a floor area in this project</button>${optionalExtrasHTML(s,base)}`;
+}
+function sectionCardHTML(j,s,i){
+  const base='job.sections.'+i;
+  const type=s.projectType||'floor';
+  const types=[['floor','Measured floor','Sq ft and system'],['garage','Garage','Package price'],['flatwork','Table / counter / bar','Size and starting price'],['seating','Chairs / stools','Quantity and starting price']];
+  return `<section class="area project-section">
+    <div class="area-top"><span class="area-badge">PROJECT ${String(i+2).padStart(2,'0')}</span>
+      <button type="button" class="remove" data-remove-project="${i}" aria-label="Remove project">×</button></div>
+    <div class="fields">${field('Project name',base+'.label','text','Example: Home garage, or Bar')}</div>
+    <div class="field full"><label for="f-${escape(base)}.address">Location</label><input id="f-${escape(base)}.address" data-path="${base}.address" type="text" value="${escape(s.address||'')}" placeholder="${escape(j.address||'Same as the job address')}" autocomplete="street-address"><small>Blank uses the job address.</small></div>
+    <div class="project-type-grid">${types.map(([id,label,help])=>`<button type="button" class="project-type-card ${type===id?'active':''}" data-section-type="${id}" data-section-index="${i}" aria-pressed="${type===id}"><span class="opt-name">${escape(label)}</span><span class="opt-meta">${escape(help)}</span></button>`).join('')}</div>
+    <p class="method-note">Base price assumes a good slab and a simple pour. Extras add on top. An extra with no price is left out of the customer total.</p>
+    ${sectionInputsHTML(s,base,i)}
+  </section>`;
+}
+function multiProjectHTML(j){
+  const sections=Array.isArray(j.sections)?j.sections:[];
+  return `<div class="palette-block" id="projectSections">
+    <span class="eyebrow">MORE THAN ONE PROJECT</span>
+    <p class="hint">One quote can cover a garage plus tables and chairs, or a garage at home and a bar at another address. Each project has its own type, location, and price.</p>
+    <div class="fields">${field('Name for this project','job.sectionLabel','text','Optional. This is project 1 on the quote.')}</div>
+    <p class="method-note">Project 1 uses the job address${j.address?' · <b>'+escape(j.address)+'</b>':''}. The price tier, the deposit, and the $2,000 minimum apply once, to the whole quote.</p>
+    ${sections.map((s,i)=>sectionCardHTML(j,s,i)).join('')}
+    <button type="button" class="add-area" data-add-project="1">+ Add another area / project</button>
+  </div>`;
+}
 function stepContact(j){
   return `<section class="card">${cardHead('01','Customer & lead','Name, then a phone, email, or the job address.')}
   ${j.isSample?`<div class="sample-banner"><b>ILLUSTRATIVE SAMPLE DATA</b> — fictional/demo content for training. Not a live customer record.</div>`:''}
@@ -905,6 +993,7 @@ function stepContact(j){
   <div class="palette-block"><span class="eyebrow">PROJECT TYPE</span>
     <p class="hint">Floors use the tape-measure steps. Garage, counters, and seating use package prices set by the owner.</p>
     ${projectTypePickerHTML(j)}
+    ${multiProjectHTML(j)}
   </div>
   <details class="more-options"><summary>More options</summary><div class="detail-body">
     <div class="fields">${field('Company','job.company')}${authMode()&&j._serverId?field('Document number','job.number','text','Assigned by the server when the job was first saved.','readonly'):field('Document number','job.number','text',authMode()?'Provisional — the server assigns the final number on first save.':'')}${field('Document date','job.date','date')}</div>
@@ -932,18 +1021,21 @@ function stepAreas(j){
       <p class="method-note">Moisture selected on ${moist.items.length} area(s): <b>${num(moist.sqft)} sq ft</b> × ${cash(moist.rate)} = <b>${cash(moist.total)}</b></p>
       <button class="add-area" id="addArea">+ Add another floor area</button>
       <p class="method-note">Total measured: <b>${num(j.areas.reduce((s,a)=>s+computeAreaSqft(a),0),2)} sq ft</b></p>`:''}
+    ${multiProjectHTML(j)}
     </section>`;
   }
   if(j.projectType==='flatwork'){
     return `<section class="card">${cardHead('02','Tables, countertops & bars','Dimensions · size band · photos')}
     ${priceNeededBanner(x)}
     ${flatworkItemsHTML(j)}
+    ${multiProjectHTML(j)}
     </section>`;
   }
   if(j.projectType==='seating'){
     return `<section class="card">${cardHead('02','Chairs, stools & seating','Quantity · type · photos')}
     ${priceNeededBanner(x)}
     ${seatingItemsHTML(j)}
+    ${multiProjectHTML(j)}
     </section>`;
   }
   return `<section class="card">${cardHead('02','Areas, measurements & photos','Size each floor. Photos and moisture barrier are optional.')}
@@ -953,6 +1045,7 @@ function stepAreas(j){
   <p class="method-note">Moisture selected on ${moist.items.length} area(s): <b>${num(moist.sqft)} sq ft</b> × ${cash(moist.rate)} = <b>${cash(moist.total)}</b></p>
   <button class="add-area" id="addArea">+ Add another floor area</button>
   <p class="method-note">Total measured: <b>${num(j.areas.reduce((s,a)=>s+computeAreaSqft(a),0),2)} sq ft</b></p>
+  ${multiProjectHTML(j)}
   </section>`;
 }
 function moistureJobSummaryHTML(j){
@@ -1071,6 +1164,15 @@ function stepSelections(j){
 }
 function optionCardsHTML(x){
   const regularTotal=x.choices&&x.choices.regular?x.choices.regular.total:0;
+  if(x.multi){
+    return Object.values(x.choices||{}).map(c=>{
+      const rows=(c.breakdown&&c.breakdown.extras||[]).map(e=>`<li>${escape(e.label)}: ${x.quoteReady?cash(e.amount):'Pending'}</li>`).join('');
+      const min=c.minimum?`<li>Minimum job charge, once for the whole quote: ${cash(c.minimum)}</li>`:'';
+      const compared=c.key==='regular'?'<span class="opt-meta">One set of payment terms for every project. No second deposit.</span>':`<span class="opt-save">${cash(c.savings)} below the regular full total of ${cash(regularTotal)} (${num(c.savingsPct)}% of that full total)</span>`;
+      const pays=(c.payments||[]).length?`<ul>${c.payments.map(p=>`<li>${cash(p.amount)} · ${num(p.pct)}% of ${cash(c.total)} · ${escape(p.label)}</li>`).join('')}</ul>`:'';
+      return `<button type="button" class="option-card ${x.selected.key===c.key?'active':''}" data-option="${c.key}" aria-pressed="${x.selected.key===c.key}"><span class="opt-name">${escape(c.label)}${x.selected.key===c.key?'<span class="pill">SELECTED</span>':''}</span><span class="opt-total">${x.quoteReady?cash(c.total):'Pending'}</span>${rows||min?`<ul>${rows}${min}</ul>`:''}${c.payMethod?`<span class="opt-meta">${escape(c.payMethod)}</span>`:''}${compared}${pays}</button>`;
+    }).join('');
+  }
   return Object.values(x.choices).map(c=>{
     const b=c.breakdown||{};
     const extras=(b.extras||[]).map(e=>`<li>${escape(e.label)}: ${cash(e.amount)} <small>separate from the finish rate</small></li>`).join('');
@@ -1232,6 +1334,7 @@ function ownerViewHTML(){
   return `<details class="owner-view"><summary>Owner view</summary><div class="detail-body">
     <p class="hint">Cost, margin, and profit stay in this section. They are left off the customer and subcontractor documents.</p>
     <div class="cost-mini"><span class="eyebrow">OWNER ONLY · INTERNAL</span>
+      ${(x.sections||[]).length>1?x.sections.map(s=>`<div class="summary-row"><span>${escape(s.label)} cost</span><strong>${cash(s.cost)}</strong></div><div class="summary-row"><span>${escape(s.label)} net</span><strong>${cash(s.profit)}</strong></div>`).join('')+'<div class="summary-row"><span>Whole quote cost</span><strong>'+cash(x.cost)+'</strong></div><div class="summary-row"><span>Whole quote net</span><strong>'+cash(x.profit)+'</strong></div>':''}
       <div class="summary-row"><span>Estimated job cost</span><strong>${cash(x.cost)}</strong></div>
       <div class="summary-row"><span>Travel included in the quote</span><strong>${cash((x.sqft?x.travel.mileage:0)+(x.sqft?x.travel.crewTravel:0))}</strong></div>
       <div class="summary-row"><span>Potential remainder</span><strong class="${x.profit<0?'loss':''}">${cash(x.profit)}</strong></div>
@@ -1239,6 +1342,7 @@ function ownerViewHTML(){
       <div class="summary-row"><span>Net margin after overhead</span><strong>${num(x.operatingMargin,1)}%</strong></div>
       <div class="summary-row"><span>Margin after contingency and per-job tooling</span><strong>${num(x.margin,1)}%</strong></div>
       <p class="method-note">Gross is price minus labor minus materials. Net subtracts the monthly overhead spread only. A 30% markup is a 23.1% margin, not a 30% margin.</p>
+      ${(x.unpricedExtras||[]).length?`<p class="method-note">${x.unpricedExtras.map(u=>escape((u.label||'Extra')+': price not set')).join('<br>')}</p>`:''}
       <div class="summary-row"><span>Approved adjustment limit</span><strong>${approvedAdjustmentLabel()}</strong></div>
       <button type="button" class="button secondary" data-view="internal">Internal job-cost and travel</button>
     </div>
@@ -1249,7 +1353,7 @@ function ownerViewHTML(){
 function stepPricing(j){
   const x=calc();
   const moist=moistureSelectedAreas(j);
-  const catalog=isCatalogJob(j);
+  const catalog=isCatalogJob(j)&&!x.multi;
   const tierChoices=[['regular','Regular · full price'],['opt1','Option 1 · bank transfer'],['opt2','Option 2 · scheduled payments']];
   return `<section class="card">${cardHead('05','Customer pricing & payments','Pick one price. Travel stays inside the total.')}
   ${priceNeededBanner(x)}
@@ -1633,6 +1737,11 @@ function internalContent(print=false){
     ?[['Job cost',cash(x.cost),'Direct + overhead + contingency'],['Customer revenue',cash(x.total),cash(x.perSqft)+'/sq ft blended'],['Potential profit',cash(x.profit),'Owner-only · before income tax'],['Margin',num(x.margin)+'%',num(x.personHours)+' person-hr · crew '+x.crew]]
     :[['Approved customer total',cash(x.total),cash(x.perSqft)+'/sq ft blended'],['Sq ft',num(x.sqft),j.areas.length+' area(s)'],['Person-hours (ops)',num(x.personHours),'Crew '+x.crew],(authMode()?['Server','ON',x._server?'Verified totals':'Price check pending']:['Cloud','OFF','Not configured'])]
   ).map(([a,b,c])=>`<div class="metric"><span>${a}</span><strong>${b}</strong><small>${c}</small></div>`).join('')}</div>
+  ${x.sections&&x.sections.length>1?`<section class="${print?'':'card'}" style="margin-top:16px"><h3>Projects on this quote</h3>
+    ${x.sections.map(s=>`<p class="method-note"><b>${escape(s.label)}</b> · ${escape(s.address||j.address||'Job address')} · subtotal ${s.quoteReady?cash(s.subtotal):'Pending'}${owner?' · cost '+cash(s.cost)+' · net '+cash(s.profit):''}</p>`).join('')}
+    ${owner?`<p class="method-note">Whole quote cost ${cash(x.cost)} · net ${cash(x.profit)}. The $2,000 minimum and any approved discount are on the grand total, not on each project.</p>`:''}
+    ${owner&&(x.unpricedExtras||[]).length?`<p class="method-note">${x.unpricedExtras.map(u=>escape((u.label||'Extra')+': price not set')).join('<br>')}</p>`:''}
+  </section>`:''}
   ${owner?'':'<div class="info-banner"><b>Worker field plan:</b> operational quantities and checklist only. Expected profit, margin, and discount authority are owner-only (legal/compliance wording — employees do not see those figures in this preview).</div>'}
   ${baselineSheetHTML(j,s,owner,print)}
 
@@ -1830,15 +1939,16 @@ function customerDocument(){
   }).join('<br/>');
   const blockedDoc=(x.blockingIssues||[]).length>0;
   const totalBlock=x.quoteReady
-    ?`<div class="doc-total">${x.selected.breakdown?`<div><span>Finish</span><span>${cash(x.selected.breakdown.finishAmount)}</span></div><div><span>Separate extras</span><span>${cash(x.selected.breakdown.extrasAmount)}</span></div>`:''}${x.minimum?`<div><span>${escape(x.minimumLabel||'Minimum project adjustment')}</span><span>${cash(x.minimum)}</span></div>`:''}${x.discount?`<div><span>Approved extra discount</span><span>−${cash(x.discount)}</span></div>`:''}${x.salesTax?`<div><span>Sales tax (${num(j.tax)}%)</span><span>${cash(x.salesTax)}</span></div>`:''}<div class="grand"><span>Total ${j.docType==='invoice'?'price':'estimate'}</span><span>${cash(x.total)}</span></div><p class="method-note">A previously saved customer quote is not changed by opening this screen.</p>${x.sqft?`<div><span>Blended installed rate*</span><span>${cash(x.perSqft)} / sq ft</span></div>`:''}${x.selected.key!=='regular'?`<div><span>Below the regular full total</span><span>${cash(x.selected.savings)} (${num(x.selected.savingsPct)}% of that full total)</span></div>`:''}</div>`
+    ?`<div class="doc-total">${x.multi?'':x.selected.breakdown?`<div><span>Finish</span><span>${cash(x.selected.breakdown.finishAmount)}</span></div><div><span>Separate extras</span><span>${cash(x.selected.breakdown.extrasAmount)}</span></div>`:''}${x.minimum?`<div><span>${escape(x.minimumLabel||'Minimum project adjustment')}</span><span>${cash(x.minimum)}</span></div>`:''}${x.discount?`<div><span>Approved extra discount</span><span>−${cash(x.discount)}</span></div>`:''}${x.salesTax?`<div><span>Sales tax (${num(j.tax)}%)</span><span>${cash(x.salesTax)}</span></div>`:''}<div class="grand"><span>${x.multi?'Grand total':('Total '+(j.docType==='invoice'?'price':'estimate'))}</span><span>${cash(x.total)}</span></div><p class="method-note">A previously saved customer quote is not changed by opening this screen.</p>${x.sqft?`<div><span>Blended installed rate*</span><span>${cash(x.perSqft)} / sq ft</span></div>`:''}${x.selected.key!=='regular'?`<div><span>Below the regular full total</span><span>${cash(x.selected.savings)} (${num(x.selected.savingsPct)}% of that full total)</span></div>`:''}</div>`
     :blockedDoc
       ?`<div class="doc-total"><div class="grand"><span>Total ${j.docType==='invoice'?'price':'estimate'}</span><span class="pending-total">Needs fixing</span></div><div><span>Status</span><span>Not issued</span></div></div>`
       :`<div class="doc-total"><div class="grand"><span>Total ${j.docType==='invoice'?'price':'estimate'}</span><span class="pending-total">Pending — starting price needed</span></div><div><span>Status</span><span>Incomplete / not finalized</span></div></div>`;
   return `<article class="document">${j.isSample?'<div class="sample-banner"><b>ILLUSTRATIVE SAMPLE DATA</b></div>':''}
   ${blockedDoc?priceNeededBanner(x):(!x.quoteReady?`<div class="warn-banner"><b>Starting price needed</b> — this document is not a finalized customer quote. Required price-book inputs are unconfigured.</div>`:'')}
   <div class="doc-top"><div><div class="doc-brand">${escape(b.name)}</div><div class="doc-contact">${escape(b.address)}<br/>${escape(b.phone)}${b.email?'<br/>'+escape(b.email):''}</div></div><div class="doc-title"><h2>${j.docType==='invoice'?'Invoice':'Estimate'}${x.quoteReady?'':' (pending)'}</h2><p>${escape(j.number)}<br/>${escape(j.date)}</p></div></div>
-  <div class="doc-client"><div><span class="doc-caption">Prepared for</span><b>${escape(j.customer||j.company||'Customer to be confirmed')}</b>${j.customer&&j.company?'<br/>'+escape(j.company):''}${j.email?'<br/>'+escape(j.email):''}${j.phone?'<br/>'+escape(j.phone):''}</div><div><span class="doc-caption">Project location</span>${escape(j.address||'Address to be confirmed')}<br/><b>${catalog?(j.projectType+' · '+(j.garagePackage||((j.catalogItems||[]).length+' item(s)'))):(num(x.sqft)+' sq ft total')}</b></div></div>
-  ${catalog?catalogBreakdownDocHTML(x):(x.selected&&x.selected.breakdown?tableHTML(['Work / scope','Quantity','Rate','Amount'],[
+  <div class="doc-client"><div><span class="doc-caption">Prepared for</span><b>${escape(j.customer||j.company||'Customer to be confirmed')}</b>${j.customer&&j.company?'<br/>'+escape(j.company):''}${j.email?'<br/>'+escape(j.email):''}${j.phone?'<br/>'+escape(j.phone):''}</div><div><span class="doc-caption">Project location</span>${escape(j.address||'Address to be confirmed')}<br/><b>${x.multi?((x.sections||[]).length+' projects'):catalog?(j.projectType+' · '+(j.garagePackage||((j.catalogItems||[]).length+' item(s)'))):(num(x.sqft)+' sq ft total')}</b></div></div>
+  ${x.multi&&x.sections&&x.sections.length>1?`<h3 style="margin:8px 0">Projects on this quote</h3>`+x.sections.map(s=>`<div class="doc-client"><div><span class="doc-caption">${escape(s.label)}</span>${escape(s.address||j.address||'Address to be confirmed')}</div><div><span class="doc-caption">Section subtotal</span><b>${s.quoteReady?cash(s.subtotal):'Pending'}</b></div></div>`).join(''):''}
+  ${x.multi?'':catalog?catalogBreakdownDocHTML(x):(x.selected&&x.selected.breakdown?tableHTML(['Work / scope','Quantity','Rate','Amount'],[
     `<tr><td><b>Finish · ${escape(x.selected.short)}</b><small>This rate × quantity is the finish portion of the total below.</small></td><td class="num">${num(x.selected.breakdown.finishQty)} sq ft</td><td class="num">${cash(x.selected.breakdown.finishRate)}</td><td class="num">${cash(x.selected.breakdown.finishAmount)}</td></tr>`,
     ...(x.selected.breakdown.extras||[]).map(e=>`<tr><td><b>${escape(e.label)}</b><small>Separate from the finish rate. Not a material surcharge.</small></td><td class="num">${num(e.qty)} ${escape(e.unit||'')}</td><td class="num">${cash(e.rate)}</td><td class="num">${cash(e.amount)}</td></tr>`)
   ]):tableHTML(['Work / scope','Quantity','Rate','Amount'],vis.map(a=>`<tr><td><b>${escape(a.label)}</b><small>${escape(a.description)}</small></td><td class="num">${num(a.qty)} ${escape(a.unit)}</td><td class="num">${cash(a.rate)}</td><td class="num">${cash(a.total)}</td></tr>`)))}
@@ -1916,6 +2026,12 @@ function jobRecord(j){
     garagePackage:j.garagePackage||'',areas:(j.areas||[]).map(a=>({style:a&&a.style||''})),
     catalogItems:(j.catalogItems||[]).map(it=>({style:it&&it.style||''})),
     priceOption:j.priceOption||'regular',assignedCrew:j.assignedCrew||'',estimatorName:estimatorLabel(j),
+    sections:(Array.isArray(j.sections)?j.sections:[]).map(s=>({
+      projectType:s.projectType||'floor',address:s.address||'',label:s.label||'',
+      garageStyle:s.garageStyle||'',garagePackage:s.garagePackage||'',
+      areas:(s.areas||[]).map(a=>({style:a&&a.style||''})),
+      catalogItems:(s.catalogItems||[]).map(it=>({style:it&&it.style||''}))
+    })),
     createdAt:j.createdAt||'',updatedAt:j._updatedAt||j.updatedAt||'',date:j.date||'',_status:j._status||'',
     draftMark:j.draftMark||'',customerTotal:price.ready?price.total:null,isSample:!!j.isSample
   };
@@ -1949,14 +2065,15 @@ function jobBoardCard(record){
   const B=window.EsJobBoard;
   const status=B.statusOf(record);
   const systems=Array.from(B.systemsOf(record)).filter(s=>B.LABELS.system[s]).map(s=>B.LABELS.system[s]);
-  const type=B.LABELS.type[record.projectType]||record.projectType||'Job';
+  const type=B.typeSummary?B.typeSummary(record):(B.LABELS.type[record.projectType]||record.projectType||'Job');
+  const places=B.sectionAddresses?B.sectionAddresses(record).filter(Boolean):[record.address].filter(Boolean);
   const tier=B.LABELS.tier[record.priceOption||'regular']||record.priceOption||'Regular';
   const size=record.projectType==='garage'?(B.LABELS.garageSize[record.garagePackage]||''):'';
   const total=record.customerTotal==null?'Pending':cash(record.customerTotal);
   const ownerTools=owner?`<div class="inline-actions job-card-actions"><button type="button" class="quiet" data-job-archive="${escape(record.id)}">${status==='archived'?'Unarchive':'Archive'}</button><button type="button" class="quiet" data-job-delete="${escape(record.id)}">Delete</button></div>`:'';
   return `<article class="job-card${record.id===state.activeJobId?' active':''}">
     <div class="job-card-top">${owner?`<label class="check-label job-pick"><input type="checkbox" data-job-select="${escape(record.id)}" ${jobBoardSelected.has(record.id)?'checked':''} aria-label="Select job"></label>`:''}
-      <button type="button" class="job-card-open" data-switch-job="${escape(record.id)}"><b>${escape(record.customer||record.company||'Untitled lead')}${record.isSample?' · ILLUSTRATIVE SAMPLE':''}</b><small>${escape(record.address||'No address')} · ${escape(record.number)} · updated ${escape(String(record.updatedAt||'').slice(0,10))}</small></button>
+      <button type="button" class="job-card-open" data-switch-job="${escape(record.id)}"><b>${escape(record.customer||record.company||'Untitled lead')}${record.isSample?' · ILLUSTRATIVE SAMPLE':''}</b><small>${escape(places.join(' · ')||'No address')} · ${escape(record.number)} · updated ${escape(String(record.updatedAt||'').slice(0,10))}</small></button>
       <span class="pill">${escape(B.LABELS.status[status]||status)}</span></div>
     <dl class="job-card-meta">
       <div><dt>Type</dt><dd>${escape(type)}</dd></div>
@@ -2524,6 +2641,47 @@ document.addEventListener('click',e=>{
   if(t.dataset.switchJob){state.activeJobId=t.dataset.switchJob;if(state.view==='jobs'&&t.classList.contains('job-card-open')){go('guided');toast('Opened job')}else{render();toast('Switched job')}}
   if(t.dataset.colorKey!==undefined){const a=activeJob().areas[Number(t.dataset.areaIndex)];a.colorKey=t.dataset.colorKey;applyColorFields(a);render()}
   if(t.dataset.flakeBlend!==undefined){const a=activeJob().areas[Number(t.dataset.areaIndex)];a.flakeBlend=t.dataset.flakeBlend;applyColorFields(a);render()}
+  if(t.dataset.addProject!==undefined){
+    const j=activeJob();
+    if(!Array.isArray(j.sections))j.sections=[];
+    j.sections.push(E.newSection('floor'));
+    pushHistory(j,'project','Added another project');
+    render();
+    return;
+  }
+  if(t.dataset.removeProject!==undefined){
+    const j=activeJob();
+    if(Array.isArray(j.sections))j.sections.splice(Number(t.dataset.removeProject),1);
+    render();
+    return;
+  }
+  if(t.dataset.sectionType){
+    const j=activeJob();
+    const i=Number(t.dataset.sectionIndex);
+    const prev=(j.sections||[])[i]||{};
+    const next=E.newSection(t.dataset.sectionType);
+    next.id=prev.id||next.id;
+    next.label=prev.label||'';
+    next.address=prev.address||'';
+    if(!Array.isArray(j.sections))j.sections=[];
+    j.sections[i]=next;
+    pushHistory(j,'project','Project '+(i+2)+' → '+next.projectType);
+    render();
+    return;
+  }
+  if(t.dataset.addSectionArea!==undefined){
+    const s=(activeJob().sections||[])[Number(t.dataset.addSectionArea)];
+    if(s){s.areas=s.areas||[];s.areas.push(guidedArea({sqftMode:'manual',name:'Floor area'}));}
+    render();
+    return;
+  }
+  if(t.dataset.addSectionItem!==undefined){
+    const s=(activeJob().sections||[])[Number(t.dataset.addSectionItem)];
+    if(s&&s.projectType==='seating'){const item=E.newSeatItem();item.condition='good';s.catalogItems.push(item);}
+    else if(s){const item=E.newFlatItem();item.condition='good';item.kind='bar';item.name='Bar';s.catalogItems.push(item);}
+    render();
+    return;
+  }
   if(t.dataset.projectType){
     const j=activeJob();j.projectType=t.dataset.projectType;
     if(j.projectType==='flatwork'&&!(j.catalogItems||[]).length)j.catalogItems=[E.newFlatItem()];

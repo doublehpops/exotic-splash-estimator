@@ -416,7 +416,8 @@ function smallSolidFloorAmount(settings,job,tier){
 }
 function bindingMinimum(settings,job,pre,active,tier){
   if(!active)return {minimum:0,label:''};
-  const jobMin=minimumJobAmount(settings);
+  /* A section inside a multi-project quote skips the $2,000 minimum. That minimum is applied once to the whole quote. */
+  const jobMin=(job&&job._skipJobMinimum)?0:minimumJobAmount(settings);
   const solidMin=smallSolidFloorAmount(settings,job,tier);
   const target=Math.max(jobMin,solidMin);
   const minimum=Math.max(0,target-pre);
@@ -979,7 +980,7 @@ function discountRoom(job,settings,pre,minimum){
   return n(pre);
 }
 
-function calculate(job,settings){
+function calculateOne(job,settings){
  const type=projectTypeOf(job);
  /* Garage 1/2/3-car packages use catalog path; measured/>3-car and floor use floor engine */
  if(type==='flatwork'||type==='seating'||(type==='garage'&&!garageUsesMeasured(job))){
@@ -1154,8 +1155,245 @@ function calculate(job,settings){
    quoteReady:!!sqft,quoteStatus:sqft?'ready':'incomplete',pendingReasons:[],catalog:type==='garage'?{type:'garage',garagePackage:'measured',mode:'measured_sqft'}:null,finalizedBlocked:!sqft};
  return finishQuote(job,result,collected);
 }
+function hasExtraSections(job){
+  return Array.isArray(job&&job.sections)&&job.sections.some(s=>s&&typeof s==='object'&&!Array.isArray(s));
+}
+function newSection(type){
+  const t=['floor','garage','flatwork','seating'].includes(type)?type:'floor';
+  const section={
+    id:Math.random().toString(36).slice(2,10),
+    label:'',
+    address:'',
+    projectType:t,
+    areas:[newArea()],
+    condition:'sound',
+    patchKits:0,
+    garagePackage:t==='garage'?'2car':'measured',
+    garageStyle:'flake',
+    garageTopcoat:'protective',
+    garageCondition:'good',
+    garagePrep:{cracks:false,crackLf:0,spalling:false,coatingRemoval:false,paintRemoval:false,patching:false,leveling:false,moisture:false},
+    extras:blankExtras(),
+    catalogItems:[]
+  };
+  if(t==='flatwork'){
+    const item=newFlatItem();
+    item.condition='good';
+    item.kind='bar';
+    item.name='Bar';
+    section.catalogItems=[item];
+  }
+  if(t==='seating'){
+    const item=newSeatItem();
+    item.condition='good';
+    section.catalogItems=[item];
+  }
+  return section;
+}
+const SECTION_TYPE_LABEL={floor:'Measured floor',garage:'Garage',flatwork:'Tables / counters / bars',seating:'Chairs / stools'};
+function sectionLabelOf(job,section,index){
+  const named=String((section&&section.label)||(!section&&job&&job.sectionLabel)||'').trim();
+  if(named)return named;
+  const type=section?projectTypeOf(section):projectTypeOf(job);
+  return 'Project '+(index+1)+' · '+(SECTION_TYPE_LABEL[type]||type);
+}
+function sectionAddressOf(job,section){
+  if(!section)return String(job&&job.address||'').trim();
+  const own=String(section.address||'').trim();
+  return own||String(job&&job.address||'').trim();
+}
+function childForSection(job,section,priceOption,stripMobilization){
+  const child=Object.assign({},job);
+  delete child.sections;
+  child._skipJobMinimum=true;
+  child.tax=0;
+  child.discount=0;
+  child.discountApproval=null;
+  child.paid=0;
+  child.priceOption=priceOption||'regular';
+  if(stripMobilization){child.miles=0;child.minutes=0;child.visits=0;child.rentalDays=0}
+  if(section){
+    const keys=['projectType','areas','condition','patchKits','garagePackage','garageStyle','garageTopcoat','garageCondition','garagePrep','extras','catalogItems','label'];
+    for(const k of keys)if(section[k]!==undefined)child[k]=section[k];
+  }
+  return child;
+}
+function quoteSections(job){
+  const extra=(Array.isArray(job&&job.sections)?job.sections:[]).filter(s=>s&&typeof s==='object'&&!Array.isArray(s));
+  return [null,...extra];
+}
+function combineTier(job,settings,key,parts,sections){
+  const ready=parts.length>0&&parts.every(p=>p.quoteReady);
+  const scope=r2(parts.reduce((s,p)=>s+(p.quoteReady?n(p.subtotal):0),0));
+  const jobMin=minimumJobAmount(settings);
+  const minimum=ready?r2(Math.max(0,jobMin-scope)):0;
+  const pre=scope;
+  const discount=ready?appliedExtraDiscount(job,settings,discountRoom(job,settings,pre,minimum),key):0;
+  const subtotal=ready?Math.max(0,r2(pre+minimum-discount)):0;
+  const salesTax=r2(subtotal*n(job.tax)/100);
+  const total=ready?r2(subtotal+salesTax):0;
+  const opt=key==='regular'?null:(settings.pricingOptions||{})[key];
+  const sched=opt&&Array.isArray(opt.schedule)?opt.schedule:[];
+  let paid=0;
+  const payments=ready?sched.map((p,i)=>{
+    const amount=i===sched.length-1?r2(total-paid):r2(total*n(p.pct)/100);
+    paid=r2(paid+amount);
+    return {pct:n(p.pct),label:p.label,amount};
+  }):[];
+  const sectionLines=parts.map((p,i)=>({
+    label:sectionLabelOf(job,sections[i],i),
+    kind:'section',
+    qty:1,
+    unit:'project',
+    rate:p.quoteReady?r2(p.subtotal):0,
+    amount:p.quoteReady?r2(p.subtotal):0
+  }));
+  const summed=r2(scope+minimum-discount+salesTax);
+  return {
+    key,
+    label:opt?opt.label:'Regular price',
+    short:opt?(opt.short||opt.label):'Regular retail',
+    payMethod:opt&&opt.payMethod||'',
+    rate:0,
+    project:scope,
+    adjustment:0,
+    pre,
+    minimum,
+    minimumLabel:minimum>0.001?'Minimum job charge':'',
+    discount:ready?discount:0,
+    subtotal,
+    salesTax,
+    total,
+    savings:0,
+    savingsPct:0,
+    payments,
+    pctTotal:sched.reduce((s,p)=>s+n(p.pct),0),
+    percentLines:[],
+    breakdown:{
+      finishRate:0,
+      finishQty:r2(parts.reduce((s,p)=>s+n(p.sqft),0)),
+      finishAmount:0,
+      extras:sectionLines,
+      extrasAmount:scope,
+      minimum,
+      discount:ready?discount:0,
+      salesTax,
+      total,
+      reconciles:!ready||Math.abs(summed-total)<0.02
+    },
+    paymentsReconcile:!payments.length||Math.abs(r2(payments.reduce((s,p)=>s+n(p.amount),0))-total)<0.02
+  };
+}
+function sumField(parts,key){return parts.reduce((s,p)=>s+n(p[key]),0)}
+function sectionUnpriced(part){
+  const raw=[].concat(part&&part.unpricedLines||[],part&&part.unpricedExtras||[]);
+  return raw.map(u=>{
+    if(u&&typeof u==='object')return {label:String(u.label||'Extra'),note:'price not set'};
+    const text=String(u||'');
+    const label=text.replace(/:\s*price not set.*$/i,'').trim()||text||'Extra';
+    return {label,note:'price not set'};
+  });
+}
+function calculateMulti(job,settings){
+  const sections=quoteSections(job);
+  const po=settings.pricingOptions||{};
+  const tierKeys=['regular'].concat(Object.keys(po).filter(k=>k!=='regular'));
+  const byTier={};
+  for(const key of tierKeys){
+    byTier[key]=sections.map((section,i)=>calculateOne(childForSection(job,section,key,i>0),settings));
+  }
+  const selectedKey=byTier[job.priceOption]?job.priceOption:'regular';
+  const parts=byTier[selectedKey];
+  const choices={};
+  for(const key of tierKeys)choices[key]=combineTier(job,settings,key,byTier[key],sections);
+  const regularTotal=choices.regular?choices.regular.total:0;
+  for(const c of Object.values(choices)){
+    c.savings=r2(regularTotal-c.total);
+    c.savingsPct=regularTotal?c.savings/regularTotal*100:0;
+    c.savingsBasis='full quote total';
+  }
+  const sel=choices[selectedKey]||choices.regular;
+  const first=parts[0]||emptyResult();
+  const sqft=sumField(parts,'sqft');
+  const subtotal=n(sel.subtotal);
+  const cost=r2(sumField(parts,'cost'));
+  const mat=r2(sumField(parts,'mat'));
+  const tax=r2(sumField(parts,'tax'));
+  const labor=r2(sumField(parts,'labor'));
+  const equip=r2(sumField(parts,'equip'));
+  const overhead=r2(sumField(parts,'overhead'));
+  const overheadBase=r2(sumField(parts,'overheadBase'));
+  const contingency=r2(sumField(parts,'contingency'));
+  const direct=r2(sumField(parts,'direct'));
+  const profit=r2(subtotal-cost);
+  const margin=subtotal?profit/subtotal*100:0;
+  const materialCost=mat+tax;
+  const grossProfit=r2(subtotal-labor-materialCost);
+  const grossMargin=subtotal?grossProfit/subtotal*100:0;
+  const operatingProfit=r2(grossProfit-overheadBase);
+  const operatingMargin=subtotal?operatingProfit/subtotal*100:0;
+  const seen=new Set();
+  const unpricedLines=[];
+  const sectionRows=parts.map((p,i)=>{
+    for(const u of sectionUnpriced(p)){
+      const label=sectionLabelOf(job,sections[i],i)+': '+u.label;
+      if(!seen.has(label)){seen.add(label);unpricedLines.push(label+': price not set')}
+    }
+    const price=p.quoteReady?r2(p.subtotal):0;
+    const sectionCost=r2(p.cost);
+    return {
+      id:(sections[i]&&sections[i].id)||(i===0?'primary':String(i)),
+      index:i,
+      projectType:sections[i]?projectTypeOf(sections[i]):projectTypeOf(job),
+      label:sectionLabelOf(job,sections[i],i),
+      address:sectionAddressOf(job,sections[i]),
+      subtotal:price,
+      sqft:n(p.sqft),
+      quoteReady:!!p.quoteReady,
+      pendingReasons:[].concat(p.pendingReasons||[]),
+      minimum:n(p.minimum),
+      minimumLabel:p.minimumLabel||'',
+      cost:sectionCost,
+      profit:r2(price-sectionCost),
+      margin:price?((price-sectionCost)/price*100):0
+    };
+  });
+  const warnings=[];
+  const warnSeen=new Set();
+  for(const p of parts){
+    for(const w of p.warnings||[]){
+      if(warnSeen.has(w))continue;
+      warnSeen.add(w);
+      warnings.push(w);
+    }
+  }
+  if(sel.key!=='regular')warnings.push('Payment tiers do not stack. One deposit is taken on the whole quote.');
+  if(n(job.discount)>0&&!(job.discountApproval&&job.discountApproval.ok))warnings.push('An extra discount is not applied until the owner approves this estimate revision and selected price tier.');
+  const lines=sectionRows.map(s=>({kind:'section',label:s.label,description:s.address,qty:1,unit:'project',rate:s.subtotal,total:s.subtotal}));
+  const ready=sectionRows.every(s=>s.quoteReady);
+  const result={
+    sqft,finished:sumField(parts,'finished'),levelArea:sumField(parts,'levelArea'),levelEquiv:sumField(parts,'levelEquiv'),
+    material:parts.reduce((s,p)=>s.concat(p.material||[]),[]),
+    mat,tax,
+    hours:parts.reduce((s,p)=>s.concat(p.hours||[]),[]),
+    labor,equipment:first.equipment||[],equip,direct,overhead,overheadBase,overheadItems:parts.reduce((s,p)=>s.concat(p.overheadItems||[]),[]),contingency,cost,
+    lines,base:r2(sumField(parts,'base')),regularBase:r2(sumField(parts,'regularBase')),discountable:r2(sumField(parts,'discountable')),discountSqft:sumField(parts,'discountSqft'),
+    choices,selected:sel,addOn:first.addOn||addOnInfo(job,settings,sqft),travel:first.travel,travelCost:r2(sumField(parts,'travelCost')),travelInQuote:r2(sumField(parts,'travelInQuote')),crew:first.crew,
+    discount:n(sel.discount),minimum:n(sel.minimum),minimumLabel:sel.minimumLabel||'',subtotal,salesTax:n(sel.salesTax),total:n(sel.total),
+    profit,margin,grossProfit,grossMargin,operatingProfit,operatingMargin,perSqft:sqft&&ready?n(sel.total)/sqft:0,
+    travelMiles:n(first.travelMiles),personHours:sumField(parts,'personHours'),balance:Math.max(0,n(sel.total)-n(job.paid)),warnings,
+    quoteReady:ready,quoteStatus:ready?'ready':'pending_prices',pendingReasons:sectionRows.reduce((s,row)=>s.concat(row.pendingReasons||[]),[]),
+    unpricedLines,catalog:null,finalizedBlocked:!ready,multi:true,sections:sectionRows
+  };
+  const collected={blocks:parts.reduce((s,p)=>s.concat(p.blockingIssues||[]),[]),warnings:[]};
+  return finishQuote(job,result,collected);
+}
+function calculate(job,settings){
+  if(hasExtraSections(job))return calculateMulti(job,settings);
+  return calculateOne(job,settings);
+}
 function describe(a){const names={solid:'Solid-color epoxy',flake:'Decorative flake epoxy',metallic:'Metallic epoxy',sealer:'Clear sealer + protective topcoat',level:'Self-leveling preparation only'};let s=names[a.style]||names.solid;if(a.style!=='level'){const col=(a.colorKey==='custom'&&a.customColor)?a.customColor:(a.color||'color to be confirmed');s+='; '+col;}if(a.style==='solid')s+='; '+Math.max(1,n(a.coats))+' base coat(s)';if(a.style==='flake'){s+='; '+(a.flake==='full'?'full broadcast':a.flake==='medium'?'medium broadcast':'light spot flakes');const fb=(a.flakeBlend==='custom'&&a.customFlakeBlend)?a.customFlakeBlend:(a.flakeBlendLabel||a.flakeBlend||'');if(fb)s+=', flake blend: '+fb;}if(a.topcoat==='premium'&&a.style!=='level')s+='; Polyaspartic topcoat';if(a.grip&&a.style!=='level')s+='; slip-resistant texture';if(a.style==='level'||a.level)s+='; leveling '+n(a.depth)+' inch average';if(a.moisture||(a.prep&&a.prep.moisture))s+='; moisture-control primer/barrier on this area';return s;}
 function areaHasMoisture(a){return !!(a&&(a.moisture||(a.prep&&a.prep.moisture)))}
 function moistureSqft(job){let s=0;for(const a of job.areas||[]){const sf=n(a.sqft);if(!sf)continue;if(a.style==='level')continue;if(areaHasMoisture(a))s+=sf}return s}
-const api={defaults,newArea,newJob,newFlatItem,newSeatItem,calculate,describe,n,sn,travelInfo,addOnInfo,crewSize,areaHasMoisture,moistureSqft,isConfigured,configuredAmount,projectTypeOf,garageUsesMeasured,garageStartingKey,flatworkBandForSqft,buildCatalogBreakdown,catalogDefaults,garagePackageDefaults,UNCONFIGURED,marginToMarkup,markupToMargin,overheadMonthlyTotal,overheadPerHourRate,overheadSpread,FIGURE_STATUS,OVERHEAD_LINES,minimumJobAmount,allowancesIncluded,blankExtras,packageTablePrice,smallSolidFloorAmount,solidSystemSqft,normalizeStaffPackages};if(typeof module!=='undefined'&&module.exports)module.exports=api;root.EpoxyEngine=api;
+const api={defaults,newArea,newJob,newFlatItem,newSeatItem,newSection,calculate,describe,n,sn,travelInfo,addOnInfo,crewSize,areaHasMoisture,moistureSqft,isConfigured,configuredAmount,projectTypeOf,garageUsesMeasured,garageStartingKey,flatworkBandForSqft,buildCatalogBreakdown,catalogDefaults,garagePackageDefaults,UNCONFIGURED,marginToMarkup,markupToMargin,overheadMonthlyTotal,overheadPerHourRate,overheadSpread,FIGURE_STATUS,OVERHEAD_LINES,minimumJobAmount,allowancesIncluded,blankExtras,packageTablePrice,smallSolidFloorAmount,solidSystemSqft,normalizeStaffPackages,sectionAddressOf,sectionLabelOf,hasExtraSections};if(typeof module!=='undefined'&&module.exports)module.exports=api;root.EpoxyEngine=api;
 })(typeof window!=='undefined'?window:globalThis);
