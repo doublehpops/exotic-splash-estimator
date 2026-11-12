@@ -34,7 +34,7 @@ begin
       v_top := '{}'::jsonb;
       v_staff := jsonb_set(v_staff, '{catalog,garage,topcoatAdj}', v_top, true);
     end if;
-    if v_top->'premium' is null then
+    if coalesce(jsonb_typeof(v_top->'premium'),'null') = 'null' then
       v_staff := jsonb_set(v_staff, '{catalog,garage,topcoatAdj,premium}', '1.00'::jsonb, true);
     end if;
 

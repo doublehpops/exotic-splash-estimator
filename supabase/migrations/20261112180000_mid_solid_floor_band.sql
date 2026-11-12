@@ -41,7 +41,7 @@ begin
       v_floor := '{}'::jsonb;
     end if;
 
-    if v_floor->'min' is null then
+    if coalesce(jsonb_typeof(v_floor->'min'),'null') = 'null' then
       v_floor := jsonb_set(v_floor, '{min}', '2750'::jsonb, true);
     end if;
 
@@ -52,8 +52,8 @@ begin
         if coalesce(v_band->>'source', '') in ('package', 'garagePackage')
            and coalesce(v_band->>'system', 'solid') = 'solid'
            and coalesce(v_band->>'size', v_band->>'packageSize', '2') in ('2', '2car', 'twoCar')
-           and v_band->'min' is null
-           and v_band->'amount' is null
+           and coalesce(jsonb_typeof(v_band->'min'),'null') = 'null'
+           and coalesce(jsonb_typeof(v_band->'amount'),'null') = 'null'
            and v_band->>'minSqft' = '400'
            and v_band->>'maxSqft' = '500'
         then
@@ -65,7 +65,7 @@ begin
       v_floor := jsonb_set(v_floor, '{bands}', v_kept, true);
     end if;
 
-    if v_floor->'maxSqft' is null or (v_removed and v_floor->>'maxSqft' = '400') then
+    if coalesce(jsonb_typeof(v_floor->'maxSqft'),'null') = 'null' or (v_removed and v_floor->>'maxSqft' = '400') then
       v_floor := jsonb_set(v_floor, '{maxSqft}', '500'::jsonb, true);
     end if;
 

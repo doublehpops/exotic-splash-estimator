@@ -8,7 +8,8 @@
 --
 -- jsonb_set creates only the last key of a path, so extras and
 -- extras.multiColor are created before the two rates.
--- A missing rate is filled. A rate the owner already saved is kept.
+-- A missing rate, including a key that holds JSON null, is filled.
+-- A rate the owner already saved is kept.
 --
 -- price_book.version increments by 1 when a rate is written. The version
 -- trigger, if it is already installed, is told not to increment a second time.
@@ -37,10 +38,10 @@ begin
       v_color := '{}'::jsonb;
       v_staff := jsonb_set(v_staff, '{extras,multiColor}', v_color, true);
     end if;
-    if v_color->'metallicPerSqft' is null then
+    if coalesce(jsonb_typeof(v_color->'metallicPerSqft'),'null') = 'null' then
       v_staff := jsonb_set(v_staff, '{extras,multiColor,metallicPerSqft}', '1.50'::jsonb, true);
     end if;
-    if v_color->'customFlakePerSqft' is null then
+    if coalesce(jsonb_typeof(v_color->'customFlakePerSqft'),'null') = 'null' then
       v_staff := jsonb_set(v_staff, '{extras,multiColor,customFlakePerSqft}', '1.00'::jsonb, true);
     end if;
 
