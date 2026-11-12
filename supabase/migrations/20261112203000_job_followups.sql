@@ -340,11 +340,15 @@ begin
   v_local := p_from at time zone 'America/Chicago';
   v_day := v_local::date + 1;
   v_target := v_day + time '10:00';
+  -- Sunday is closed. Monday 10:00 stays inside 9:00-20:00.
+  if extract(dow from v_target) = 0 then
+    v_target := (v_day + 1) + time '10:00';
+  end if;
   v_hour := extract(hour from v_target)::int;
   if v_hour < 9 then
-    v_target := v_day + time '09:00';
+    v_target := v_target::date + time '09:00';
   elsif v_hour >= 20 then
-    v_target := (v_day + 1) + time '09:00';
+    v_target := (v_target::date + 1) + time '09:00';
   end if;
   return v_target at time zone 'America/Chicago';
 end;
@@ -359,16 +363,22 @@ as $function$
 declare
   v_local timestamp;
   v_hour int;
+  v_result timestamptz;
 begin
   v_local := p_at at time zone 'America/Chicago';
   v_hour := extract(hour from v_local)::int;
   if v_hour >= 9 and v_hour < 20 then
-    return p_at;
+    v_result := p_at;
+  elsif v_hour < 9 then
+    v_result := (v_local::date + time '09:00') at time zone 'America/Chicago';
+  else
+    v_result := ((v_local::date + 1) + time '09:00') at time zone 'America/Chicago';
   end if;
-  if v_hour < 9 then
-    return (v_local::date + time '09:00') at time zone 'America/Chicago';
+  v_local := v_result at time zone 'America/Chicago';
+  if extract(dow from v_local) = 0 then
+    return ((v_local::date + 1) + time '09:00') at time zone 'America/Chicago';
   end if;
-  return ((v_local::date + 1) + time '09:00') at time zone 'America/Chicago';
+  return v_result;
 end;
 $function$;
 
@@ -395,6 +405,74 @@ begin
 end;
 $function$;
 
+create or replace function private.followup_short_name(p jsonb)
+returns text
+language plpgsql
+immutable
+set search_path = ''
+as $function$
+declare
+  v_type text := coalesce(p->>'projectType', 'floor');
+  v_item jsonb;
+begin
+  if v_type = 'garage' then return 'garage'; end if;
+  if v_type = 'seating' then return 'seating'; end if;
+  if v_type = 'flatwork' then
+    for v_item in select value from jsonb_array_elements(coalesce(p->'catalogItems', '[]'::jsonb))
+    loop
+      if position('bar' in lower(coalesce(v_item->>'kind', '') || ' ' || coalesce(v_item->>'name', ''))) > 0 then
+        return 'bar';
+      end if;
+    end loop;
+    return 'counter';
+  end if;
+  return 'floor';
+end;
+$function$;
+
+create or replace function private.followup_one_phrase(p jsonb)
+returns text
+language plpgsql
+immutable
+set search_path = ''
+as $function$
+declare
+  v_type text := coalesce(p->>'projectType', 'floor');
+  v_size text;
+  v_style text;
+  v_styles text;
+  v_item jsonb;
+begin
+  if v_type = 'garage' then
+    v_size := case p->>'garagePackage'
+      when '1car' then '1-car'
+      when '2car' then '2-car'
+      when '3car' then '3-car'
+      else ''
+    end;
+    v_style := lower(btrim(coalesce(p->>'garageStyle', '')));
+    if v_style in ('', 'epoxy') then v_style := ''; end if;
+    return left(btrim(concat_ws(' ', nullif(v_style, ''), nullif(v_size, ''), 'garage floor')), 160);
+  end if;
+  if v_type = 'seating' then return 'seating'; end if;
+  if v_type = 'flatwork' then
+    for v_item in select value from jsonb_array_elements(coalesce(p->'catalogItems', '[]'::jsonb))
+    loop
+      if position('bar' in lower(coalesce(v_item->>'kind', '') || ' ' || coalesce(v_item->>'name', ''))) > 0 then
+        return 'bar';
+      end if;
+    end loop;
+    return 'countertop';
+  end if;
+  select string_agg(distinct lower(a->>'style'), ' and ' order by lower(a->>'style'))
+    into v_styles
+  from jsonb_array_elements(coalesce(p->'areas', '[]'::jsonb)) a
+  where coalesce(a->>'style', '') <> '' and lower(a->>'style') <> 'epoxy';
+  if coalesce(v_styles, '') = '' then return 'floor'; end if;
+  return left(v_styles || ' floor', 160);
+end;
+$function$;
+
 create or replace function private.followup_project_summary(p_job jsonb)
 returns text
 language plpgsql
@@ -402,34 +480,41 @@ immutable
 set search_path = ''
 as $function$
 declare
-  v_type text := coalesce(p_job->>'projectType', 'floor');
-  v_pkg text := coalesce(p_job->>'garagePackage', '');
-  v_style text := coalesce(p_job->>'garageStyle', '');
-  v_size text;
-  v_styles text;
+  v_section jsonb;
+  v_name text;
+  v_names text[] := '{}';
+  v_joined text;
+  v_i int;
 begin
-  if v_type = 'garage' then
-    v_size := case v_pkg
-      when '1car' then '1-car'
-      when '2car' then '2-car'
-      when '3car' then '3-car'
-      when 'measured' then 'measured'
-      else 'garage'
-    end;
-    if v_style = '' then v_style := 'epoxy'; end if;
-    if v_size = 'garage' then
-      return left(v_size || ', ' || v_style, 160);
-    end if;
-    return left(v_size || ' garage, ' || v_style, 160);
+  if p_job is null or jsonb_typeof(coalesce(p_job->'sections', '[]'::jsonb)) <> 'array'
+     or jsonb_array_length(coalesce(p_job->'sections', '[]'::jsonb)) = 0 then
+    return private.followup_one_phrase(p_job);
   end if;
-  if v_type = 'flatwork' then return 'countertop'; end if;
-  if v_type = 'seating' then return 'seating'; end if;
-  select string_agg(distinct a->>'style', ' and ' order by a->>'style')
-    into v_styles
-  from jsonb_array_elements(coalesce(p_job->'areas', '[]'::jsonb)) a
-  where coalesce(a->>'style', '') <> '';
-  if coalesce(v_styles, '') = '' then return 'floor'; end if;
-  return left(v_styles || ' floor', 160);
+  v_name := private.followup_short_name(p_job);
+  if v_name <> '' and not (v_name = any (v_names)) then
+    v_names := v_names || v_name;
+  end if;
+  for v_section in select value from jsonb_array_elements(p_job->'sections')
+  loop
+    if jsonb_typeof(v_section) <> 'object' then continue; end if;
+    v_name := private.followup_short_name(v_section);
+    if v_name <> '' and not (v_name = any (v_names)) then
+      v_names := v_names || v_name;
+    end if;
+  end loop;
+  if cardinality(v_names) <= 1 then
+    return private.followup_one_phrase(p_job);
+  end if;
+  if cardinality(v_names) = 2 then
+    v_joined := v_names[1] || ' and ' || v_names[2];
+  else
+    v_joined := v_names[1];
+    for v_i in 2..cardinality(v_names) - 1 loop
+      v_joined := v_joined || ', ' || v_names[v_i];
+    end loop;
+    v_joined := v_joined || ' and ' || v_names[cardinality(v_names)];
+  end if;
+  return left(v_joined || ' projects', 160);
 end;
 $function$;
 
@@ -505,7 +590,7 @@ begin
   end if;
 
   if not found then
-    v_token := 'svy_' || replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', '');
+    v_token := 's' || rtrim(translate(encode(extensions.gen_random_bytes(12), 'base64'), '+/', '-_'), '=');
     v_hash := private.share_token_hash(v_token);
     insert into public.job_followups (
       job_id, status, channel, job_outcome, scheduled_for, consent, phone_e164,
@@ -561,10 +646,14 @@ security definer
 set search_path = ''
 as $function$
 begin
-  if current_setting('es.followup_scheduling', true) = 'on' then
+  if position(new.id::text in coalesce(current_setting('es.followup_scheduling', true), '')) > 0 then
     return new;
   end if;
-  perform set_config('es.followup_scheduling', 'on', true);
+  perform set_config(
+    'es.followup_scheduling',
+    coalesce(current_setting('es.followup_scheduling', true), '') || ',' || new.id::text,
+    true
+  );
   perform private.schedule_job_followup(new.id);
   return new;
 end;
@@ -591,10 +680,6 @@ as $function$
 declare
   v_id uuid;
 begin
-  if current_setting('es.followup_scheduling', true) = 'on' then
-    return new;
-  end if;
-  perform set_config('es.followup_scheduling', 'on', true);
   for v_id in
     select j.id from public.jobs j
     where j.job_number = new.estimate_number
@@ -776,6 +861,23 @@ begin
   if not found then
     raise exception 'Follow-up was not found' using errcode = 'P0002';
   end if;
+  if v.status in ('sent', 'completed', 'opted_out')
+     or v.sent_at is not null
+     or v.opted_out_at is not null
+     or (
+       v.phone_e164 is not null
+       and exists (select 1 from public.followup_opt_outs o where o.phone_e164 = v.phone_e164)
+     ) then
+    if v.opted_out_at is not null
+       or v.status = 'opted_out'
+       or (
+         v.phone_e164 is not null
+         and exists (select 1 from public.followup_opt_outs o where o.phone_e164 = v.phone_e164)
+       ) then
+      raise exception 'This number opted out' using errcode = '42501';
+    end if;
+    raise exception 'This follow-up is already finished' using errcode = '42501';
+  end if;
   if v_action = 'skip' then
     update public.job_followups
        set status = 'skipped', last_error = 'skipped', updated_at = now()
@@ -833,7 +935,7 @@ declare
   v_hash text;
   v public.job_followups%rowtype;
 begin
-  if p_token is null or p_token !~ '^svy_[0-9a-f]{64}$' then
+  if p_token is null or p_token !~ '^s[A-Za-z0-9_-]{16}$' then
     return jsonb_build_object('ok', false, 'code', 'not_found');
   end if;
   v_hash := private.share_token_hash(p_token);
@@ -877,7 +979,7 @@ declare
   v_why text;
   v_clean jsonb;
 begin
-  if p_token is null or p_token !~ '^svy_[0-9a-f]{64}$' then
+  if p_token is null or p_token !~ '^s[A-Za-z0-9_-]{16}$' then
     return jsonb_build_object('ok', false, 'code', 'not_found');
   end if;
   if p_answers is null or jsonb_typeof(p_answers) <> 'object' then
@@ -953,6 +1055,8 @@ revoke all on function private.followup_settings() from public, anon, authentica
 revoke all on function private.next_followup_at(timestamptz) from public, anon, authenticated, service_role;
 revoke all on function private.roll_contact_window(timestamptz) from public, anon, authenticated, service_role;
 revoke all on function private.followup_e164(text) from public, anon, authenticated, service_role;
+revoke all on function private.followup_short_name(jsonb) from public, anon, authenticated, service_role;
+revoke all on function private.followup_one_phrase(jsonb) from public, anon, authenticated, service_role;
 revoke all on function private.followup_project_summary(jsonb) from public, anon, authenticated, service_role;
 revoke all on function private.schedule_job_followup(uuid) from public, anon, authenticated, service_role;
 revoke all on function private.jobs_sync_followup_consent() from public, anon, authenticated, service_role;

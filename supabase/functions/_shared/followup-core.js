@@ -16,8 +16,8 @@ const COMPANY_NAME='Exotic Splash Epoxy';
 const DEFAULT_FROM='+13125842873';
 const SURVEY_BASE='https://doublehpops.github.io/exotic-splash-estimator/survey.html';
 const MAX_ATTEMPTS=3;
-const TOKEN_RE=/^svy_[0-9a-f]{64}$/;
-const STOP_WORDS=['stop','stopall','unsubscribe','cancel','end','quit'];
+const TOKEN_RE=/^s[A-Za-z0-9_-]{16}$/;
+const STOP_WORDS=['stop','stopall','unsubscribe','cancel','end','quit','optout','revoke'];
 const TERMINAL=['sent','completed','skipped','opted_out','dry_run','sms_not_configured'];
 const SURVEY_QUESTIONS=[
   {id:'on_time',prompt:'Was the estimator on time?',type:'yes_no'},
@@ -63,21 +63,35 @@ function addCalendarDays(year,month,day,n){
 function atChicago(year,month,day,hour,minute){
   return zonedTimeToUtc(year,month,day,hour,minute);
 }
-/** Next calendar day at 10:00 America/Chicago, then rolled into 9:00–20:00. */
+function chicagoWeekday(date){
+  const d=date instanceof Date?date:new Date(date);
+  return new Intl.DateTimeFormat('en-US',{timeZone:TZ,weekday:'short'}).format(d);
+}
+function skipSunday(instant,hour){
+  if(chicagoWeekday(instant)!=='Sun')return instant;
+  const p=chicagoParts(instant);
+  const mon=addCalendarDays(p.year,p.month,p.day,1);
+  return atChicago(mon.year,mon.month,mon.day,hour,0);
+}
+/** Next calendar day at 10:00 America/Chicago. A Sunday moves to Monday 10:00. */
 function nextFollowupAt(from){
   const p=chicagoParts(from instanceof Date?from:new Date(from));
   const next=addCalendarDays(p.year,p.month,p.day,1);
-  return rollIntoWindow(atChicago(next.year,next.month,next.day,10,0));
+  return skipSunday(atChicago(next.year,next.month,next.day,10,0),10);
 }
-/** Keep the instant when it is inside [9:00, 20:00). Otherwise roll to 9:00. */
+/** Keep the instant when it is inside [9:00, 20:00). Otherwise roll to 9:00. Sunday waits until Monday 9:00. */
 function rollIntoWindow(instant){
   const date=instant instanceof Date?instant:new Date(instant);
   const p=chicagoParts(date);
   const minutes=p.hour*60+p.minute;
-  if(minutes>=WINDOW_START_MIN&&minutes<WINDOW_END_MIN)return new Date(date.getTime());
-  if(minutes<WINDOW_START_MIN)return atChicago(p.year,p.month,p.day,9,0);
-  const next=addCalendarDays(p.year,p.month,p.day,1);
-  return atChicago(next.year,next.month,next.day,9,0);
+  let at;
+  if(minutes>=WINDOW_START_MIN&&minutes<WINDOW_END_MIN)at=new Date(date.getTime());
+  else if(minutes<WINDOW_START_MIN)at=atChicago(p.year,p.month,p.day,9,0);
+  else{
+    const next=addCalendarDays(p.year,p.month,p.day,1);
+    at=atChicago(next.year,next.month,next.day,9,0);
+  }
+  return skipSunday(at,9);
 }
 function inWindow(instant){
   const p=chicagoParts(instant instanceof Date?instant:new Date(instant));
@@ -113,24 +127,68 @@ function plainWords(text){
     .trim()
     .slice(0,160);
 }
-function projectSummary(job){
-  job=job||{};
-  const type=String(job.projectType||'floor');
-  if(type==='garage'){
-    const size={ '1car':'1-car','2car':'2-car','3car':'3-car',measured:'measured' }[job.garagePackage]||'garage';
-    const style=plainWords(job.garageStyle||'epoxy')||'epoxy';
-    const label=size==='garage'?'garage':size+' garage';
-    return plainWords(label+', '+style);
-  }
-  if(type==='flatwork')return 'countertop';
-  if(type==='seating')return 'seating';
+function joinAnd(parts){
+  const list=parts.filter(Boolean);
+  if(list.length<=1)return list[0]||'';
+  if(list.length===2)return list[0]+' and '+list[1];
+  return list.slice(0,-1).join(', ')+' and '+list[list.length-1];
+}
+function styleWord(style){
+  const s=plainWords(style||'').toLowerCase();
+  if(!s||s==='epoxy')return '';
+  return s;
+}
+function garagePhrase(section){
+  const size={'1car':'1-car','2car':'2-car','3car':'3-car'}[section&&section.garagePackage]||'';
+  const style=styleWord(section&&section.garageStyle);
+  const bits=[];
+  if(style)bits.push(style);
+  if(size)bits.push(size);
+  bits.push('garage floor');
+  return bits.join(' ');
+}
+function floorPhrase(section){
   const styles=[];
-  for(const area of job.areas||[]){
-    const style=plainWords(area&&area.style||'');
+  for(const area of (section&&section.areas)||[]){
+    const style=styleWord(area&&area.style);
     if(style&&styles.indexOf(style)<0)styles.push(style);
   }
   if(!styles.length)return 'floor';
-  return plainWords(styles.join(' and ')+' floor');
+  return joinAnd(styles)+' floor';
+}
+function isBar(section){
+  for(const item of (section&&section.catalogItems)||[]){
+    const kind=String(item&&(item.kind||item.name)||'').toLowerCase();
+    if(kind.indexOf('bar')>=0)return true;
+  }
+  return false;
+}
+function shortProject(section){
+  const type=String(section&&section.projectType||'floor');
+  if(type==='garage')return 'garage';
+  if(type==='seating')return 'seating';
+  if(type==='flatwork')return isBar(section)?'bar':'counter';
+  return 'floor';
+}
+function onePhrase(section){
+  const type=String(section&&section.projectType||'floor');
+  if(type==='garage')return garagePhrase(section);
+  if(type==='flatwork')return isBar(section)?'bar':'countertop';
+  if(type==='seating')return 'seating';
+  return floorPhrase(section);
+}
+function projectSummary(job){
+  job=job||{};
+  const extras=(Array.isArray(job.sections)?job.sections:[]).filter(function(s){return s&&typeof s==='object'&&!Array.isArray(s);});
+  if(!extras.length)return onePhrase(job);
+  const names=[];
+  const all=[job].concat(extras);
+  for(const section of all){
+    const name=shortProject(section);
+    if(name&&names.indexOf(name)<0)names.push(name);
+  }
+  if(names.length<=1)return onePhrase(job);
+  return joinAnd(names)+' projects';
 }
 function jobOutcome(decision){
   const d=String(decision||'').trim().toLowerCase();
@@ -157,28 +215,29 @@ function surveyUrl(base,token){
 }
 function followupSms(input){
   const name=input.firstName?('Hi '+input.firstName+', '):'Hi, ';
-  const company=input.companyName||COMPANY_NAME;
-  const project=plainWords(input.projectSummary||'');
-  let text=name+'this is Ashley with '+company+'. Thanks for letting us come out';
-  if(project)text+=' about your '+project;
-  text+='.';
+  const project=plainWords(input.projectSummary||'')||'project';
+  let text=name+'this is Ashley with Exotic Splash Epoxy. Thanks for having us out to look at your '+project+'.';
   if(input.outcome==='booked'){
-    text+=' Thanks for choosing us. We will confirm the next steps with you.';
+    text+=" Thanks for choosing us. We'll reach out to confirm next steps.";
+  }else if(input.outcome==='declined'){
+    text+=' If something held you back, just reply and let us know. We read every reply.';
   }else{
-    text+=' If something held you back, reply and tell us — we read every reply.';
+    text+=' If you have any questions about the quote, just reply here.';
   }
-  text+=' A short survey: '+input.surveyUrl;
-  text+=' Reply STOP to opt out.';
+  text+=' Got a minute? Tell us how we did: '+(input.surveyUrl||'');
+  text+='\n- Ashley, Exotic Splash\nReply STOP to opt out.';
   return text;
 }
 function dynamicVariables(input){
+  const sms=input.smsBody||followupSms(input);
   return {
     call_type:'followup',
     customer_first_name:String(input.firstName||''),
     job_outcome:jobOutcome(input.outcome),
     project_summary:plainWords(input.projectSummary||''),
     survey_url:String(input.surveyUrl||''),
-    company_name:COMPANY_NAME
+    company_name:COMPANY_NAME,
+    sms_body:sms
   };
 }
 function fromNumber(env){
@@ -441,9 +500,37 @@ function verifyTwilioSignature(url,params,authToken,signature,hmacB64){
   if(!expected)return false;
   return timingSafeEqualText(expected,signature);
 }
+function stopWords(body){
+  return String(body||'').toLowerCase().replace(/[^a-z]+/g,' ').trim().split(' ').filter(Boolean);
+}
 function isStopMessage(body){
-  const s=String(body||'').trim().toLowerCase().replace(/[^a-z]/g,'');
-  return STOP_WORDS.indexOf(s)>=0;
+  const words=stopWords(body);
+  if(!words.length)return false;
+  const first=words[0];
+  if(STOP_WORDS.indexOf(first)>=0)return true;
+  if(first==='opt'&&words[1]==='out')return true;
+  if(first==='stop'&&words[1]==='all')return true;
+  const whole=words.join(' ');
+  if(whole==='opt out'||whole==='stop all')return true;
+  if(words.length===1&&STOP_WORDS.indexOf(whole.replace(/ /g,''))>=0)return true;
+  return false;
+}
+function replyWhyNot(message,outcome,analysis){
+  if(isStopMessage(message&&message.body))return '';
+  const fromAnalysis=analysis&&(analysis.why_not||analysis.whyNot);
+  if(fromAnalysis&&String(fromAnalysis).trim())return String(fromAnalysis).trim().slice(0,1000);
+  if(outcome==='booked')return '';
+  const body=String(message&&message.body||'').trim();
+  if(body.length<8)return '';
+  return body.slice(0,1000);
+}
+function ownerMayChange(row,action){
+  row=row||{};
+  if(row.status==='sent'||row.status==='completed'||row.status==='opted_out')return {ok:false,reason:'finished'};
+  if(row.optedOut===true||row.optedOutAt||row.opted_out_at)return {ok:false,reason:'opted_out'};
+  if(row.sentAt||row.sent_at)return {ok:false,reason:'finished'};
+  if(action==='text_now'&&row.consent===false)return {ok:false,reason:'no_consent'};
+  return {ok:true};
 }
 function recordInbound(row,message){
   const replies=Array.isArray(row.inboundReplies)?row.inboundReplies.slice():[];
@@ -464,8 +551,11 @@ function recordInbound(row,message){
     row.optedOut=true;
     row.optedOutAt=message.at||new Date().toISOString();
     if(['scheduled','failed','sending','dry_run'].indexOf(row.status)>=0)row.status='opted_out';
+  }else if(!row.outcomeReason){
+    const why=replyWhyNot(message,row.jobOutcome||row.outcome,message.analysis);
+    if(why)row.outcomeReason=why;
   }
-  return {row:row,duplicate:false,optedOut:opted};
+  return {row:row,duplicate:false,optedOut:opted,whyNot:row.outcomeReason||''};
 }
 function retellEvents(payload){
   const body=payload||{};
@@ -599,7 +689,7 @@ return {
   decideDispatch:decideDispatch,claimFollowup:claimFollowup,planSchedule:planSchedule,
   runDispatch:runDispatch,verifyRetellSignature:verifyRetellSignature,
   parseRetellSignature:parseRetellSignature,verifyTwilioSignature:verifyTwilioSignature,
-  isStopMessage:isStopMessage,recordInbound:recordInbound,retellEvents:retellEvents,
+  isStopMessage:isStopMessage,replyWhyNot:replyWhyNot,ownerMayChange:ownerMayChange,recordInbound:recordInbound,retellEvents:retellEvents,
   validateSurveyAnswers:validateSurveyAnswers,sha256Hex:sha256Hex,tokenFromHash:tokenFromHash,
   consumeSurvey:consumeSurvey,openSurvey:openSurvey,textNowAt:textNowAt,fromNumber:fromNumber
 };

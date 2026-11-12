@@ -30,7 +30,16 @@ function row(over){
   },over||{});
 }
 function token(){
-  return 'svy_'+crypto.randomBytes(32).toString('hex');
+  return 's'+crypto.randomBytes(12).toString('base64').replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+const GSM7="@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà";
+function assertGsm7(text){
+  for(const ch of text){
+    assert.ok(GSM7.includes(ch),'not GSM-7: '+JSON.stringify(ch));
+  }
+  assert.ok(!text.includes(';'));
+  assert.ok(!text.includes('—'));
+  assert.ok(!text.includes('–'));
 }
 
 check('next day 10:00 Chicago, including across midnight and daylight saving',()=>{
@@ -68,6 +77,23 @@ check('next day 10:00 Chicago, including across midnight and daylight saving',()
   assert.strictEqual(afterSpring.toISOString(),'2026-03-09T15:00:00.000Z');
 });
 
+check('Sunday waits until Monday and Saturday still sends, including daylight saving',()=>{
+  const friday=F.nextFollowupAt(new Date('2026-11-13T21:00:00.000Z'));
+  assert.strictEqual(friday.toISOString(),'2026-11-14T16:00:00.000Z');
+  const saturdayQuote=F.nextFollowupAt(new Date('2026-11-14T20:00:00.000Z'));
+  assert.strictEqual(saturdayQuote.toISOString(),'2026-11-16T16:00:00.000Z');
+  const sundayNow=F.rollIntoWindow(new Date('2026-11-15T16:00:00.000Z'));
+  assert.strictEqual(sundayNow.toISOString(),'2026-11-16T15:00:00.000Z');
+  const saturdayNight=F.rollIntoWindow(new Date('2026-11-15T03:00:00.000Z'));
+  assert.strictEqual(saturdayNight.toISOString(),'2026-11-16T15:00:00.000Z');
+  const saturdayMorning=F.rollIntoWindow(new Date('2026-11-14T16:00:00.000Z'));
+  assert.strictEqual(saturdayMorning.toISOString(),'2026-11-14T16:00:00.000Z');
+  const spring=F.nextFollowupAt(new Date('2027-03-13T21:00:00.000Z'));
+  assert.strictEqual(spring.toISOString(),'2027-03-15T15:00:00.000Z');
+  const fall=F.nextFollowupAt(new Date('2027-11-06T20:00:00.000Z'));
+  assert.strictEqual(fall.toISOString(),'2027-11-08T16:00:00.000Z');
+});
+
 check('texting outside 9 AM-8 PM Chicago rolls to the next open window',()=>{
   const night=F.rollIntoWindow(new Date('2026-11-13T03:30:00.000Z'));
   assert.strictEqual(chicago(night.toISOString()).hour,9);
@@ -92,7 +118,11 @@ check('schedule keeps one sms row and does not move a time that is already set',
   assert.strictEqual(first.action,'insert');
   assert.strictEqual(first.row.channel,'sms');
   assert.strictEqual(first.row.status,'scheduled');
-  assert.strictEqual(first.row.projectSummary,'2-car garage, metallic');
+  assert.strictEqual(first.row.projectSummary,'metallic 2-car garage floor');
+  assert.strictEqual(F.projectSummary({
+    projectType:'garage',garagePackage:'2car',garageStyle:'flake',
+    sections:[{projectType:'flatwork',catalogItems:[{kind:'bar',name:'Bar'}]}]
+  }),'garage and bar projects');
   assert.ok(!/\$|\bcost\b|\bmargin\b/.test(JSON.stringify(first.row.projectSummary)));
   const again=F.planSchedule(first.row,{
     at:new Date('2026-11-13T18:00:00.000Z'),outcome:'booked',consent:true,phone:job.phone,customer:job.customer,projectSummary:first.row.projectSummary
@@ -155,7 +185,7 @@ check('switches default off, dry run does not call the provider, and voice is no
   });
   assert.strictEqual(dry.results[0].action,'dry_run');
   assert.strictEqual(calls,0);
-  assert.ok(dry.logs[0].smsBody.includes('Thanks for letting us come out'));
+  assert.ok(dry.logs[0].smsBody.includes('Thanks for having us out'));
   assert.ok(!dry.logs[0].authorization);
   assert.ok(!JSON.stringify(dry.logs[0]).includes('test-key'));
   const again=await F.runDispatch({
@@ -218,21 +248,46 @@ check('missing provider is sms_not_configured and does not throw',async()=>{
 });
 
 check('thank-you text has the survey link and no prices',()=>{
-  const booked=F.followupSms({firstName:'Alex',outcome:'booked',projectSummary:'2-car garage, metallic',surveyUrl:'https://example.test/survey.html#t=svy_abc',companyName:'Exotic Splash Epoxy'});
-  assert.ok(booked.includes('Thanks for letting us come out'));
-  assert.ok(booked.includes('Thanks for choosing us'));
-  assert.ok(booked.includes('https://example.test/survey.html#t=svy_abc'));
-  assert.ok(booked.includes('STOP'));
+  const url='https://example.test/survey.html#t=sAAAAAAAAAAAAAAA';
+  const booked=F.followupSms({firstName:'Alex',outcome:'booked',projectSummary:'metallic 2-car garage floor',surveyUrl:url});
+  assert.ok(booked.includes('Thanks for having us out to look at your metallic 2-car garage floor.'));
+  assert.ok(booked.includes("Thanks for choosing us. We'll reach out to confirm next steps."));
+  assert.ok(booked.includes(url));
+  assert.ok(booked.includes('- Ashley, Exotic Splash'));
+  assert.ok(booked.endsWith('Reply STOP to opt out.'));
   assert.ok(!/\$/.test(booked));
-  const declined=F.followupSms({firstName:'',outcome:'declined',projectSummary:'flake floor',surveyUrl:'https://example.test/s',companyName:'Exotic Splash Epoxy'});
-  assert.ok(declined.includes('held you back'));
+  const declined=F.followupSms({firstName:'',outcome:'declined',projectSummary:'flake floor',surveyUrl:url});
+  assert.ok(declined.includes('If something held you back, just reply and let us know. We read every reply.'));
   assert.ok(!declined.includes('choosing us'));
-  const sms=F.buildRetellSms(row({attemptCount:1,surveyUrl:'https://example.test/s'}),{RETELL_FOLLOWUP_AGENT_ID:'agent_text',RETELL_FROM_NUMBER:'+13125842873'});
+  const undecided=F.followupSms({firstName:'Una',outcome:'undecided',projectSummary:'metallic and solid floor',surveyUrl:url});
+  assert.ok(undecided.includes('If you have any questions about the quote, just reply here.'));
+  const sample=row({attemptCount:1,surveyUrl:url,projectSummary:'flake floor',firstName:'Dan',outcome:'declined'});
+  sample.smsBody=F.followupSms(sample);
+  const sms=F.buildRetellSms(sample,{RETELL_FOLLOWUP_AGENT_ID:'agent_text',RETELL_FROM_NUMBER:'+13125842873'});
   assert.strictEqual(sms.url,'https://api.retellai.com/create-sms-chat');
   assert.strictEqual(sms.json.retell_llm_dynamic_variables.call_type,'followup');
-  assert.strictEqual(sms.json.retell_llm_dynamic_variables.job_outcome,'undecided');
+  assert.strictEqual(sms.json.retell_llm_dynamic_variables.sms_body,sample.smsBody);
   assert.strictEqual(sms.json.from_number,'+13125842873');
   assert.ok(!sms.json.headers);
+});
+
+check('every follow-up template is GSM-7 and under 320 characters besides the link',()=>{
+  const url='https://doublehpops.github.io/exotic-splash-estimator/survey.html#t=sAAAAAAAAAAAAAAA';
+  assert.ok(url.length<90);
+  for(const outcome of ['booked','declined','undecided']){
+    const text=F.followupSms({firstName:'Alexandra',outcome,projectSummary:'metallic 2-car garage floor',surveyUrl:url});
+    assertGsm7(text);
+    const bare=text.split(url).join('');
+    assert.ok(bare.length<=320,outcome+' '+bare.length);
+  }
+  const ui=fs.readFileSync(path.join(__dirname,'..','js/followup-ui.js'),'utf8');
+  const prompt=fs.readFileSync(path.join(__dirname,'..','docs/followup-ashley-text-prompt.md'),'utf8');
+  const app=fs.readFileSync(path.join(__dirname,'..','js/guided-app.js'),'utf8');
+  assert.ok(app.includes('OK to text me about this quote'));
+  assert.ok(!ui.includes('—')&&!ui.includes('–'));
+  assert.ok(!prompt.includes('—')&&!prompt.includes('–')&&!prompt.includes(';'));
+  const panel=UI.renderPanel({owner:true,rows:[],settings:{enabled:false,dryRun:true,voiceEnabled:false}});
+  assertGsm7(panel.replace(/<[^>]+>/g,' '));
 });
 
 check('Retell webhook signature accepts the raw body and rejects tampering and stale timestamps',()=>{
@@ -260,7 +315,11 @@ check('Twilio signature and STOP replies are stored once',()=>{
   assert.strictEqual(F.verifyTwilioSignature(url,params,token,'nope'),false);
   assert.strictEqual(F.isStopMessage('Stop'),true);
   assert.strictEqual(F.isStopMessage('STOPALL.'),true);
+  assert.strictEqual(F.isStopMessage('stop please'),true);
+  assert.strictEqual(F.isStopMessage('OPT OUT'),true);
+  assert.strictEqual(F.isStopMessage('revoke'),true);
   assert.strictEqual(F.isStopMessage('thanks'),false);
+  assert.strictEqual(F.isStopMessage('Please stop texting me'),false);
   const item=row();
   const first=F.recordInbound(item,{id:'SM123',body:'STOP',from:'+13125550148',provider:'twilio',at:'2026-11-13T16:00:00.000Z'});
   assert.strictEqual(first.optedOut,true);
@@ -269,6 +328,13 @@ check('Twilio signature and STOP replies are stored once',()=>{
   const dup=F.recordInbound(item,{id:'SM123',body:'STOP',from:'+13125550148',provider:'twilio'});
   assert.strictEqual(dup.duplicate,true);
   assert.strictEqual(item.inboundReplies.length,1);
+  const reason=row({jobOutcome:'declined'});
+  F.recordInbound(reason,{id:'m1',body:'We went with another company',analysis:{why_not:'Went with another company'}});
+  assert.strictEqual(reason.outcomeReason,'Went with another company');
+  assert.strictEqual(F.ownerMayChange({status:'sent',consent:true},'text_now').ok,false);
+  assert.strictEqual(F.ownerMayChange({status:'completed',consent:true},'reschedule').ok,false);
+  assert.strictEqual(F.ownerMayChange({status:'scheduled',optedOutAt:'2026-11-13T00:00:00Z',consent:true},'reschedule').reason,'opted_out');
+  assert.strictEqual(F.ownerMayChange({status:'scheduled',consent:true},'text_now').ok,true);
 });
 
 check('a survey token can be used once and the page has no prices',()=>{
@@ -307,7 +373,12 @@ check('employees see status only and the owner sees text actions',()=>{
   assert.ok(!employee.includes('STOP'));
   assert.ok(!employee.includes('5 / 5'));
   assert.ok(!employee.includes('5200'));
+  assert.ok(!employee.includes('A2P'));
   assert.ok(!/\$/.test(employee));
+  const sent=UI.renderPanel({owner:true,rows:[Object.assign({},rich,{id:'fu-sent',status:'sent'})],settings:{}});
+  assert.ok(!sent.includes('data-followup-action'));
+  const opted=UI.renderPanel({owner:true,rows:[Object.assign({},rich,{id:'fu-out',status:'opted_out'})],settings:{}});
+  assert.ok(!opted.includes('data-followup-action'));
   const owner=UI.renderPanel({owner:true,rows:[rich],settings:{}});
   assert.ok(owner.includes('Text now'));
   assert.ok(owner.includes('Skip'));
@@ -345,6 +416,11 @@ check('migrations are newer than 20261112183000 and contain no secrets',()=>{
   assert.ok(schema.includes("channel = 'sms'"));
   assert.ok(schema.includes('survey_used_at is null'));
   assert.ok(schema.includes('America/Chicago'));
+  assert.ok(schema.includes('extract(dow from v_target) = 0'));
+  assert.ok(schema.includes("v.status in ('sent', 'completed', 'opted_out')"));
+  assert.ok(schema.includes('new.id::text'));
+  assert.ok(schema.includes('s[A-Za-z0-9_-]{16}'));
+  assert.ok(cron.includes("interval '1 day'"));
   assert.ok(schema.includes('enable row level security'));
   assert.ok(schema.includes('force row level security'));
   assert.ok(cron.includes("'*/15 * * * *'"));

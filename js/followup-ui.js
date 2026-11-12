@@ -32,14 +32,14 @@ function renderPanel(input){
   const flags=flagsOf(input&&input.settings);
   const rows=input&&input.rows;
   const head='<div class="page-head"><div><span class="eyebrow">'+(owner?'OWNER':'YOUR JOBS')+'</span><h1>Follow-ups.</h1><p>'+(owner
-    ?'A thank-you text the day after a quote is finished, inside 9 AM–8 PM Chicago time. Survey answers stay on this account.'
-    :'Status of the follow-up on jobs this account can open. Survey answers stay with the owner.')+'</p></div></div>';
-  const banner='<div class="info-banner"><b>Text only.</b> Voice calls stay off'
+    ?'A thank-you text the day after a quote is finished, inside 9 AM-8 PM Chicago time. Survey answers stay on this account.'
+    :'Status of the follow-up on jobs this account can open.')+'</p></div></div>';
+  const banner=owner?'<div class="info-banner"><b>Text only.</b> Voice calls stay off'
     +(flags.voiceEnabled?'':' (voice switch is off and nothing is scheduled to call)')
-    +'. Real texts also need A2P 10DLC registration on +1 312-584-2873. The switches ship off, and dry run logs the message instead of sending it.</div>';
+    +'. Real texts also need A2P 10DLC registration on +1 312-584-2873. The switches ship off, and dry run logs the message instead of sending it.</div>':'';
   const switches=owner?`<section class="card"><h3>Switches <span class="lock-pill owner-pill">OWNER</span></h3>
     <label class="check-label"><input id="fuEnabled" type="checkbox" ${flags.enabled?'checked':''}> Follow-ups enabled</label>
-    <label class="check-label"><input id="fuDryRun" type="checkbox" ${flags.dryRun?'checked':''}> Dry run — log the text, do not send it</label>
+    <label class="check-label"><input id="fuDryRun" type="checkbox" ${flags.dryRun?'checked':''}> Dry run. Log the text and do not send it</label>
     <label class="check-label"><input id="fuVoice" type="checkbox" ${flags.voiceEnabled?'checked':''}> Voice calls (kept in code, not scheduled while this is off)</label>
     <div class="inline-actions"><button type="button" class="button" id="fuSaveSettings">Save follow-up switches</button><button type="button" class="quiet" id="fuReload">Reload</button></div>
     <p class="method-note">Enabled is off and dry run is on until you change them here. Employees cannot change these.</p>
@@ -58,11 +58,12 @@ function ownerTable(rows){
     const score=answers&&answers.experience!=null?esc(answers.experience)+' / 5':'';
     const why=esc(r.outcomeReason||r.outcome_reason||(answers&&answers.why_not)||'');
     const replies=Array.isArray(r.inboundReplies||r.inbound_replies)?(r.inboundReplies||r.inbound_replies):[];
-    const replyText=replies.map(function(m){return esc(m.body||'');}).filter(Boolean).join(' · ');
-    const actions='<button type="button" class="button small" data-followup-action="text_now" data-followup-id="'+id+'">Text now</button> '
+    const replyText=replies.map(function(m){return esc(m.body||'');}).filter(Boolean).join(' / ');
+    const locked=['sent','completed','opted_out'].indexOf(r.status)>=0||r.optedOutAt||r.opted_out_at;
+    const actions=locked?'':('<button type="button" class="button small" data-followup-action="text_now" data-followup-id="'+id+'">Text now</button> '
       +'<button type="button" class="quiet" data-followup-action="skip" data-followup-id="'+id+'">Skip</button> '
       +'<input id="fu-when-'+id+'" type="datetime-local" aria-label="Reschedule '+esc(r.jobNumber||'')+' Chicago time"> '
-      +'<button type="button" class="quiet" data-followup-action="reschedule" data-followup-id="'+id+'">Reschedule</button>';
+      +'<button type="button" class="quiet" data-followup-action="reschedule" data-followup-id="'+id+'">Reschedule</button>');
     return '<tr><td>'+esc(r.jobNumber||'')+'<small>'+esc(r.customerFirstName||r.customer_first_name||'')+'</small></td>'
       +'<td>'+esc(statusLabel(r.status))+'<small>'+esc(r.channel||'sms')+'</small></td>'
       +'<td>'+esc(r.jobOutcome||r.job_outcome||'')+'</td>'
@@ -74,7 +75,7 @@ function ownerTable(rows){
   }).join('');
   return '<div class="table-wrap"><table><thead><tr><th>Job</th><th>Status</th><th>Outcome</th><th>When</th><th>Experience</th><th>If not, why</th><th>Replies</th><th></th></tr></thead><tbody>'
     +(tr||'<tr><td colspan="8">Nothing here.</td></tr>')+'</tbody></table></div>'
-    +'<p class="method-note">Text now sends only inside 9 AM–8 PM Chicago. Outside that window it waits until 9 AM. No prices are shown here.</p>';
+    +'<p class="method-note">Text now sends only inside 9 AM-8 PM Chicago, and never on Sunday. Outside that window it waits until 9 AM, or Monday if that would be Sunday. Sent, completed, and opted-out rows stay as they are. No prices are shown here.</p>';
 }
 function employeeTable(rows){
   const tr=rows.map(function(r){

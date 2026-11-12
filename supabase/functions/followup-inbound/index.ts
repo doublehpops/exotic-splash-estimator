@@ -94,7 +94,19 @@ Deno.serve(async (req: Request) => {
       .order("created_at", { ascending: false }).limit(1);
     row = (found.data && found.data[0]) || null;
   }
-  if (!row) return json(200, { ok: true, stored: false });
+  if (!row) {
+    const stop = messages.some((m) => F.isStopMessage(m.body));
+    const phone = phones.find(Boolean) || "";
+    if (stop && phone) {
+      await admin.from("followup_opt_outs").upsert({
+        phone_e164: phone,
+        source: provider,
+        opted_out_at: new Date().toISOString(),
+      });
+      return json(200, { ok: true, stored: true, optedOut: true });
+    }
+    return json(200, { ok: true, stored: false });
+  }
 
   const local = {
     id: row.id,
@@ -116,6 +128,18 @@ Deno.serve(async (req: Request) => {
   if (callStatus) patch.call_status = callStatus;
   if (transcriptSummary) patch.transcript_summary = transcriptSummary;
   if (analysis && typeof analysis === "object") patch.call_analysis = analysis;
+  let why = "";
+  if (analysis && typeof analysis === "object") {
+    const parsed = analysis as Record<string, unknown>;
+    why = String(parsed.why_not || parsed.whyNot || "").trim();
+  }
+  if (!why) {
+    for (const message of messages) {
+      const guess = F.replyWhyNot(message, String(row.job_outcome || ""), null);
+      if (guess) why = guess;
+    }
+  }
+  if (why && !row.outcome_reason) patch.outcome_reason = why.slice(0, 1000);
   if (opted) {
     patch.status = "opted_out";
     patch.opted_out_at = local.optedOutAt || new Date().toISOString();

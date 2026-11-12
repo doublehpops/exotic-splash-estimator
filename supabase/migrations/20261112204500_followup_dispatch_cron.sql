@@ -32,6 +32,14 @@ begin
   end;
 
   if coalesce(v_url, '') = '' or coalesce(v_bearer, '') = '' then
+    -- One note a day while the vault secrets are missing. A quiet quarter-hour does not add a row.
+    if exists (
+      select 1 from public.followup_events e
+      where e.kind = 'cron_skipped'
+        and e.at > now() - interval '1 day'
+    ) then
+      return;
+    end if;
     insert into public.followup_events (kind, detail)
     values (
       'cron_skipped',

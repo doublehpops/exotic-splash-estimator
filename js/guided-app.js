@@ -985,8 +985,8 @@ function stepContact(j){
   ${j.isSample?`<div class="sample-banner"><b>ILLUSTRATIVE SAMPLE DATA</b> — fictional/demo content for training. Not a live customer record.</div>`:''}
   <div class="fields">${field('Customer name','job.customer','text','Who the quote is for')}${field('Phone','job.phone','tel','A phone, email, or the job address is enough, with the name')}${field('Email','job.email','email')}
   <div class="field full"><label for="f-job.address">Job address</label><input id="f-job.address" data-path="job.address" type="text" value="${escape(j.address)}" placeholder="Street, city, state" autocomplete="street-address"></div></div>
-  ${checkbox('Customer agreed to a follow-up call/text','job.followupConsent')}
-  <p class="method-note">Leave this off unless the customer agreed. The lead form does not record that agreement, so it starts unchecked. Nothing is texted without it.</p>
+  ${checkbox('OK to text me about this quote','job.followupConsent')}
+  <p class="method-note">Leave this off unless the customer agreed to a text. The lead form does not record that agreement, so it starts unchecked.</p>
   ${select('Quote result','job.quoteDecision',[['','Not marked yet'],['booked','Booked'],['declined','Declined'],['undecided','Undecided']])}
   ${contactSufficient(j)?`<div class="info-banner">This job is saved${authMode()?' to your account':''} for <b>${escape(j.customer||j.company||'this lead')}</b>.</div>`
     :`<div class="empty-state"><h3>Start with the customer</h3><p>Enter a name and at least one of phone, email, or job address. A server job is not created until then.</p></div>`}
