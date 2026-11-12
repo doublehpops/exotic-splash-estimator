@@ -2,7 +2,7 @@
 -- NOT APPLIED.
 --
 -- Dry run: run the SELECT. It changes nothing.
--- Apply: run only after 20261110160000_record_approved_discount_columns.sql.
+-- Apply: run only after 20261110085927_record_approved_discount_columns.sql.
 -- The job update uses the trusted flag that migration adds, so a later save
 -- that still sends discount 0 does not clear the recorded amount, and the
 -- approving owner stays on the row. That keeps the existing discount cap from

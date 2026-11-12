@@ -1,7 +1,6 @@
 -- Additive extra-discount approvals. Does not change price_book, jobs, or earlier migrations.
 -- Direct table access is revoked. Role checks use private.staff_role(), which reads
 -- public.profiles for auth.uid(). They do not read user-editable JWT metadata.
--- Authenticated users can SELECT profiles but cannot UPDATE them.
 
 create table if not exists public.discount_approvals (
   id uuid primary key default gen_random_uuid(),
@@ -186,7 +185,7 @@ begin
     if coalesce(p_mark_stale, false) or coalesce(p_consume, false) then
       update public.discount_approvals set status = 'stale' where id = p_id and status = 'approved';
     end if;
-    return jsonb_build_object('ok', false, 'code', 'stale_approval', 'error', 'The estimate changed after approval');
+    raise exception 'The estimate changed after approval' using errcode = '40001';
   end if;
   if coalesce(p_consume, false) then
     update public.discount_approvals
@@ -197,7 +196,6 @@ begin
     end if;
   end if;
   return jsonb_build_object(
-    'ok', true,
     'id', v.id, 'status', case when coalesce(p_consume, false) then 'consumed' else 'approved' end,
     'amount', v.amount, 'beforeTotal', v.before_total, 'afterTotal', v.after_total,
     'estimateId', v.estimate_id, 'tier', v.tier
