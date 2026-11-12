@@ -145,7 +145,7 @@ function recordedDiscountAmount(snapshot){
   return Math.round(x*100)/100;
 }
 function customerVisibleLines(x){
-  return (x.lines||[]).filter(l=>{const k=l.kind||'';return k!=='mileage'&&k!=='travel'&&k!=='equipment'&&k!=='overhead'&&k!=='equip'});
+  return (x.lines||[]).filter(l=>{const k=l.kind||'';return k!=='mileage'&&k!=='travel'&&k!=='equipment'&&k!=='overhead'&&k!=='equip'&&k!=='unpriced'});
 }
 function quoteAllocation(x){
   const subtotal=n(x.subtotal),salesTax=n(x.salesTax),total=n(x.total);

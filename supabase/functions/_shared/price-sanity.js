@@ -96,6 +96,15 @@ function collectBook(settings){
     if(!hit)continue;
     (hit.level==='block'?blocks:warnings).push(hit);
   }
+  const polyRates=[
+    [settings&&settings.catalog&&settings.catalog.garage&&settings.catalog.garage.topcoatAdj&&settings.catalog.garage.topcoatAdj.premium,'Polyaspartic topcoat / sq ft'],
+    [settings&&settings.catalog&&settings.catalog.flatwork&&settings.catalog.flatwork.topcoatAdj&&settings.catalog.flatwork.topcoatAdj.premium,'Flatwork polyaspartic topcoat / sq ft']
+  ];
+  for(const [raw,label] of polyRates){
+    const hit=perSqftIssue(label,raw);
+    if(!hit)continue;
+    (hit.level==='block'?blocks:warnings).push(hit);
+  }
   const addOn=(settings&&settings.addOn)||{};
   for(const [key,label] of [['low','Standard add-in / sq ft'],['high','Higher add-in / sq ft']]){
     const hit=perSqftIssue(label,addOn[key]);
@@ -129,6 +138,14 @@ function guardSettings(settings){
     if(!next.extras[key])continue;
     const hit=perSqftIssue(label,next.extras[key].perSqft);
     if(hit&&hit.level==='block'){next.extras[key].perSqft=0;next.extras[key].min=0;}
+  }
+  if(next.catalog&&next.catalog.garage&&next.catalog.garage.topcoatAdj){
+    const hit=perSqftIssue('Polyaspartic topcoat / sq ft',next.catalog.garage.topcoatAdj.premium);
+    if(hit&&hit.level==='block')next.catalog.garage.topcoatAdj.premium=null;
+  }
+  if(next.catalog&&next.catalog.flatwork&&next.catalog.flatwork.topcoatAdj){
+    const hit=perSqftIssue('Flatwork polyaspartic topcoat / sq ft',next.catalog.flatwork.topcoatAdj.premium);
+    if(hit&&hit.level==='block')next.catalog.flatwork.topcoatAdj.premium=null;
   }
   next.addOn=next.addOn||{};
   for(const key of ['low','high']){

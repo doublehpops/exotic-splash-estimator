@@ -92,7 +92,9 @@ check('without the package table the flake base and solid credit still apply',()
   assert.strictEqual(x.total,3500);
   const met=garage('2car','metallic','regular');
   const pending=E.calculate(met,s);
-  assert.strictEqual(pending.quoteReady,false);
+  assert.strictEqual(pending.quoteReady,true);
+  assert.strictEqual(pending.total,4500);
+  assert.ok((pending.unpricedLines||[]).some(r=>/metallic/i.test(r)));
 });
 
 check('coating, paint, adhesive, and poor slab use actual sq ft and their minimums',()=>{

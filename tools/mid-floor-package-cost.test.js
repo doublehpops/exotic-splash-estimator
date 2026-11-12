@@ -160,7 +160,7 @@ check('garage package selling prices stay put and owner margins are not 100 perc
 });
 
 check('mid solid floor migration creates parent objects and is not a destructive apply',()=>{
-  const sql=fs.readFileSync(path.join(__dirname,'..','supabase/migrations/20261112170000_mid_solid_floor_band.sql'),'utf8');
+  const sql=fs.readFileSync(path.join(__dirname,'..','supabase/migrations/20261112180000_mid_solid_floor_band.sql'),'utf8');
   assert.ok(sql.includes('Not applied'));
   assert.ok(!/\bdelete\s+from\b/i.test(sql));
   assert.ok(!/\bdrop\s+table\b/i.test(sql));
