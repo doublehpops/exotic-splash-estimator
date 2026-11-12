@@ -172,6 +172,7 @@ function guidedJob(base){
   j.isSample=!!j.isSample;
   j.sampleLabel=j.sampleLabel||'';
   j.crew=E.crewSize(j);
+  j.assignedCrew=String(raw.assignedCrew!=null?raw.assignedCrew:(j.assignedCrew||'')).trim().slice(0,80);
   j.projectType=j.projectType||'floor';
   j.garagePackage=j.garagePackage||'measured';
   j.garageStyle=j.garageStyle||'flake';
@@ -501,7 +502,9 @@ function navFooter(j){
   </div>`;
 }
 function jobListHTML(){
-  return `<div class="job-switcher">${state.jobs.map(j=>`<button type="button" class="job-chip ${j.id===state.activeJobId?'active':''}" data-switch-job="${j.id}"><b>${escape(j.customer||j.company||'Untitled lead')}${j.isSample?' · ILLUSTRATIVE SAMPLE':''}</b><small>${escape(j.address||'No address')} · ${escape(j.number)} · updated ${escape((j.updatedAt||'').slice(0,10))}</small></button>`).join('')}</div>`;
+  const show=boardFilters().showArchived;
+  const jobs=state.jobs.filter(j=>show||boardStatus(j)!=='archived');
+  return `<div class="job-switcher">${jobs.map(j=>`<button type="button" class="job-chip ${j.id===state.activeJobId?'active':''}" data-switch-job="${j.id}"><b>${escape(j.customer||j.company||'Untitled lead')}${j.isSample?' · ILLUSTRATIVE SAMPLE':''}</b><small>${escape(j.address||'No address')} · ${escape(j.number)} · updated ${escape((j.updatedAt||'').slice(0,10))}</small></button>`).join('')}</div>`;
 }
 function syncDiscountApproval(j){
   if(!j)return;
@@ -1386,7 +1389,7 @@ function ratesView(){
   <p class="method-note">Product package sizes and coverages are planning allowances. Travel + equipment costs fold into internal overhead; customers never see separate equipment or mileage lines.</p>
   ${Object.entries(state.settings.products).map(([k,p])=>`<div class="product-edit"><div class="product-name">${escape(p.label)} ${owner?'':'🔒'}</div>${lockedField('Package size','settings.products.'+k+'.size','number')}${lockedField('Price / package ($)','settings.products.'+k+'.price','number')}${p.coverage?lockedField('Coverage','settings.products.'+k+'.coverage','number'):'<div class="field"><label>Coverage</label><small>From selection</small></div>'}</div>`).join('')}
   </div></details>`}
-  <details><summary>Business wording ${owner?'':'🔒'}</summary><div class="detail-body"><div class="fields">${lockedField('Business name','settings.business.name')}${lockedField('Business phone','settings.business.phone')}${lockedField('Business address','settings.business.address')}${lockedField('Business email','settings.business.email','email')}${owner?textArea('Competitive pricing review wording','settings.notes'):`<div class="field locked"><label>Competitive pricing review wording <span class="lock-pill">OWNER ONLY</span></label><textarea disabled readonly>${escape(state.settings.notes||'')}</textarea></div>`}</div></div></details>
+  <details><summary>Business wording ${owner?'':'🔒'}</summary><div class="detail-body"><div class="fields">${lockedField('Business name','settings.business.name')}${lockedField('Business phone','settings.business.phone')}${lockedField('Business address','settings.business.address')}${lockedField('Business email','settings.business.email','email')}${owner?textArea('Competitive pricing review wording','settings.notes'):`<div class="field locked"><label>Competitive pricing review wording <span class="lock-pill">OWNER ONLY</span></label><textarea disabled readonly>${escape(state.settings.notes||'')}</textarea></div>`}</div>${crewSettingsHTML()}</div></details>
   <details open><summary>Catalog packages — starting prices & adjustments ${owner?'':'🔒'}</summary><div class="detail-body">
   <div class="notice"><b>Garage packages</b> use the tier / system / size table. Overflow past 250 / 450 / 650 sq ft uses that tier’s rate for the system. The solid credit is kept for books with no table. A solid package under 500 sq ft is at least $2,750. Flatwork above 32 sq ft is quoted per sq ft.</div>
   <h4 style="margin:12px 0 6px;font-size:13px">Package price table</h4>
@@ -1852,17 +1855,288 @@ function subcontractorDocument(){
 function customerView(){return heading('CUSTOMER DOCUMENT','Clear scope. One price.','Estimate + install guide. No internal costs or margins.','<div class="inline-actions"><button class="button" data-print="customer">Print estimate + guide ↗</button><button class="button secondary" data-print="guide">Print guide only ↗</button></div>')+`<div class="doc-tools"><p>Use the browser print dialog → Save as PDF. The install guide is included with the customer package by default.</p><button class="quiet" data-view="guide">Open guide view</button> <button class="quiet" data-view="guided">← Guided workflow</button></div>`+customerDocument()+`<div class="divider"></div><h3 style="margin:18px 8px 8px">Included: How we prepare & install your floor</h3>`+customerGuideDocument()}
 function guideView(){return heading('CUSTOMER INSTALL GUIDE','How we prepare & install.','Dynamic to your selections · printable on mobile.','<button class="button" data-print="guide">Print / save PDF ↗</button>')+`<div class="doc-tools"><button class="quiet" data-view="customer">← Customer estimate</button> <button class="quiet" data-export-html="guide">Download guide HTML</button></div>`+customerGuideDocument()}
 function subView(){return heading('SUBCONTRACTOR PACK','Scope for the crew.','Privacy defaults on.','<button class="button" data-print="subcontractor">Print / save PDF ↗</button>')+`<div class="doc-tools"><button class="quiet" data-view="guided">← Guided workflow</button></div>`+subcontractorDocument()}
-function jobsView(){
-  if(authMode())return heading('JOBS','Switch or create jobs.',isOwner()?'All company jobs (server).':'Jobs you created or are assigned to (server).','')
-  +(runtime.jobsExtraHTML?runtime.jobsExtraHTML():'')
-  +`<section class="card">${jobListHTML()}
-  <div class="inline-actions"><button class="button" id="newJobKeep2">+ New job</button><button class="button secondary" id="backup2">Download my jobs (JSON)</button></div></section>`;
-  return heading('LOCAL JOBS','Switch or create jobs.','All jobs stay in this browser until you export.','')
-  +`<section class="card">${jobListHTML()}
-  <div class="inline-actions"><button class="button" id="newJobKeep2">+ New job</button><button class="button secondary" id="backup2">Backup all JSON</button></div>
-  <div class="cloud-badge off">CLOUD SYNC OFF — not configured</div>
-  <p class="route-disclosure">Deleting site data clears jobs. Photos inflate storage — export backups before clearing.</p></section>`;
+/* JOB_BOARD_START */
+let jobBoardFilters=null;
+let jobBoardSelected=new Set();
+let pendingDeleteIds=[];
+const LIVE_BOARD={jobBoardQuery:'q',jobBoardPriceMin:'priceMin',jobBoardPriceMax:'priceMax',jobBoardDateFrom:'dateFrom',jobBoardDateTo:'dateTo'};
+function boardFilters(){
+  if(!jobBoardFilters){
+    jobBoardFilters=window.EsJobBoard?window.EsJobBoard.loadFilters(localStorage):{q:'',status:'',type:'',system:'',tier:'',garageSize:'',city:'',zip:'',crew:'',estimator:'',dateField:'updated',dateFrom:'',dateTo:'',priceMin:'',priceMax:'',sort:'updated-desc',group:'none',showArchived:false};
+  }
+  return jobBoardFilters;
 }
+function persistBoardFilters(){if(window.EsJobBoard)window.EsJobBoard.saveFilters(localStorage,boardFilters())}
+function boardStatus(j){return window.EsJobBoard?window.EsJobBoard.statusOf(j):String(j&&j._status||'draft')}
+function estimatorLabel(j){
+  if(j&&j._estimatorName)return String(j._estimatorName);
+  const id=j&&j._createdBy;
+  const dir=runtime.estimatorDirectory||{};
+  if(id&&dir[id])return String(dir[id]);
+  if(!authMode())return 'Offline demo';
+  return id?'Staff':'Unknown';
+}
+function customerPrice(j){
+  try{
+    const x=E.calculate(j,state.settings);
+    if(!x||!x.quoteReady)return {ready:false,total:null};
+    const total=Number(x.total);
+    return {ready:true,total:Number.isFinite(total)?total:null};
+  }catch(e){return {ready:false,total:null}}
+}
+function jobRecord(j){
+  const price=customerPrice(j);
+  return {
+    id:j.id,customer:j.customer||'',company:j.company||'',address:j.address||'',city:j.city||'',zip:j.zip||'',
+    phone:j.phone||'',number:j.number||'',projectType:j.projectType||'floor',garageStyle:j.garageStyle||'',
+    garagePackage:j.garagePackage||'',areas:(j.areas||[]).map(a=>({style:a&&a.style||''})),
+    catalogItems:(j.catalogItems||[]).map(it=>({style:it&&it.style||''})),
+    priceOption:j.priceOption||'regular',assignedCrew:j.assignedCrew||'',estimatorName:estimatorLabel(j),
+    createdAt:j.createdAt||'',updatedAt:j._updatedAt||j.updatedAt||'',date:j.date||'',_status:j._status||'',
+    draftMark:j.draftMark||'',customerTotal:price.ready?price.total:null,isSample:!!j.isSample
+  };
+}
+function boardRecords(){return (state.jobs||[]).map(jobRecord)}
+function boardView(){return window.EsJobBoard.apply(boardRecords(),boardFilters())}
+function crewNames(){
+  const raw=state.settings&&state.settings.business&&state.settings.business.crews;
+  const list=Array.isArray(raw)?raw:[];
+  const out=[];
+  for(const name of list){const s=String(name||'').trim();if(s&&out.indexOf(s)<0)out.push(s)}
+  return out;
+}
+function crewSettingsHTML(){
+  if(!isOwner())return '';
+  const business=state.settings.business||(state.settings.business={});
+  if(!Array.isArray(business.crews))business.crews=[];
+  const rows=business.crews.map((name,i)=>`<div class="inline-actions crew-row"><input data-crew-name="${i}" type="text" maxlength="80" value="${escape(name)}" aria-label="Crew name ${i+1}"><button type="button" class="quiet" data-crew-remove="${i}">Remove</button></div>`).join('');
+  const note=authMode()?'Save the price book to keep this list for every signed-in account.':'This list stays in this browser with your other settings.';
+  return `<div class="crew-settings"><h4>Crew names</h4><p class="method-note">Names you can assign on a job. ${note} Employees can pick a name. They cannot edit this list.</p>${rows}<button type="button" class="quiet" id="addCrewName">+ Add crew</button></div>`;
+}
+function crewSelectHTML(record){
+  const names=crewNames();
+  const current=String(record.assignedCrew||'');
+  if(current&&names.indexOf(current)<0)names.unshift(current);
+  const opts=['<option value="">Unassigned</option>'].concat(names.map(n=>`<option value="${escape(n)}"${n===current?' selected':''}>${escape(n)}</option>`));
+  return `<select data-job-crew="${escape(record.id)}" aria-label="Assigned crew">${opts.join('')}</select>`;
+}
+function jobBoardCard(record){
+  const owner=isOwner();
+  const B=window.EsJobBoard;
+  const status=B.statusOf(record);
+  const systems=Array.from(B.systemsOf(record)).filter(s=>B.LABELS.system[s]).map(s=>B.LABELS.system[s]);
+  const type=B.LABELS.type[record.projectType]||record.projectType||'Job';
+  const tier=B.LABELS.tier[record.priceOption||'regular']||record.priceOption||'Regular';
+  const size=record.projectType==='garage'?(B.LABELS.garageSize[record.garagePackage]||''):'';
+  const total=record.customerTotal==null?'Pending':cash(record.customerTotal);
+  const ownerTools=owner?`<div class="inline-actions job-card-actions"><button type="button" class="quiet" data-job-archive="${escape(record.id)}">${status==='archived'?'Unarchive':'Archive'}</button><button type="button" class="quiet" data-job-delete="${escape(record.id)}">Delete</button></div>`:'';
+  return `<article class="job-card${record.id===state.activeJobId?' active':''}">
+    <div class="job-card-top">${owner?`<label class="check-label job-pick"><input type="checkbox" data-job-select="${escape(record.id)}" ${jobBoardSelected.has(record.id)?'checked':''} aria-label="Select job"></label>`:''}
+      <button type="button" class="job-card-open" data-switch-job="${escape(record.id)}"><b>${escape(record.customer||record.company||'Untitled lead')}${record.isSample?' · ILLUSTRATIVE SAMPLE':''}</b><small>${escape(record.address||'No address')} · ${escape(record.number)} · updated ${escape(String(record.updatedAt||'').slice(0,10))}</small></button>
+      <span class="pill">${escape(B.LABELS.status[status]||status)}</span></div>
+    <dl class="job-card-meta">
+      <div><dt>Type</dt><dd>${escape(type)}</dd></div>
+      <div><dt>System</dt><dd>${escape(systems.join(', ')||'—')}</dd></div>
+      <div><dt>Tier</dt><dd>${escape(tier)}</dd></div>
+      ${size?`<div><dt>Garage size</dt><dd>${escape(size)}</dd></div>`:''}
+      <div><dt>City</dt><dd>${escape(B.cityOf(record)||'—')}</dd></div>
+      <div><dt>Customer total</dt><dd>${total}</dd></div>
+      <div><dt>Estimator</dt><dd>${escape(record.estimatorName||'Unknown')}</dd></div>
+      <div><dt>Crew</dt><dd>${crewSelectHTML(record)}</dd></div>
+    </dl>${ownerTools}</article>`;
+}
+function jobBoardResultsHTML(){
+  if(!window.EsJobBoard)return jobListHTML();
+  const view=boardView();
+  if(!view.jobs.length)return '<p class="empty">No jobs match these filters.</p>';
+  const group=boardFilters().group;
+  if(!group||group==='none')return `<div class="job-board-list">${view.jobs.map(jobBoardCard).join('')}</div>`;
+  return view.groups.map(g=>`<h3 class="job-group-label">${escape(g.label)}</h3><div class="job-board-list">${g.jobs.map(jobBoardCard).join('')}</div>`).join('');
+}
+function jobBoardCountText(){
+  if(!window.EsJobBoard)return '';
+  const shown=boardView().jobs.length;
+  const hidden=(state.jobs||[]).filter(j=>boardStatus(j)==='archived'&&!boardFilters().showArchived).length;
+  return shown+' shown'+(hidden?' · '+hidden+' archived hidden':'');
+}
+function boardChoice(key,label,pairs){
+  const current=String(boardFilters()[key]||'');
+  return `<div class="field"><label for="board-${escape(key)}">${escape(label)}</label><select id="board-${escape(key)}" data-board-filter="${escape(key)}">${pairs.map(([v,t])=>`<option value="${escape(v)}"${current===String(v)?' selected':''}>${escape(t)}</option>`).join('')}</select></div>`;
+}
+function jobsDataBanner(){
+  if(!authMode())return '<div class="sample-banner" data-demo-banner="offline"><b>OFFLINE DEMO DATA.</b> These jobs stay in this browser. They are not loaded from the server.</div>';
+  const id=runtime.profile&&runtime.profile.id||'';
+  if(String(id).indexOf('preview-')===0)return '<div class="sample-banner" data-demo-banner="preview"><b>OFFLINE DEMO DATA.</b> Illustrative jobs for this screen only. Not live customers, and not loaded from the server.</div>';
+  return '';
+}
+function jobBoardHTML(){
+  if(!window.EsJobBoard)return `<section class="card">${jobListHTML()}</section>`;
+  const B=window.EsJobBoard;
+  const f=boardFilters();
+  const owner=isOwner();
+  const records=boardRecords();
+  const cities=B.distinct(records,j=>B.cityOf(j));
+  const zips=B.distinct(records,j=>B.zipOf(j));
+  const crews=crewNames().slice();
+  records.forEach(r=>{if(r.assignedCrew&&crews.indexOf(r.assignedCrew)<0)crews.push(r.assignedCrew)});
+  const estimators=B.distinct(records,j=>j.estimatorName);
+  const L=B.LABELS;
+  const filters=`<div class="fields job-board-filters">
+    ${boardChoice('status','Status',[['', 'Any status']].concat(B.STATUSES.map(s=>[s,L.status[s]])))}
+    ${boardChoice('type','Job type',[['', 'Any type'],['floor',L.type.floor],['garage',L.type.garage],['flatwork',L.type.flatwork],['seating',L.type.seating]])}
+    ${boardChoice('system','System',[['', 'Any system'],['solid',L.system.solid],['flake',L.system.flake],['metallic',L.system.metallic]])}
+    ${boardChoice('tier','Tier',[['', 'Any tier'],['regular',L.tier.regular],['opt1',L.tier.opt1],['opt2',L.tier.opt2]])}
+    ${boardChoice('garageSize','Garage size',[['', 'Any garage size'],['1car',L.garageSize['1car']],['2car',L.garageSize['2car']],['3car',L.garageSize['3car']],['measured',L.garageSize.measured]])}
+    ${boardChoice('city','City',[['', 'Any city']].concat(cities.map(c=>[c,c])))}
+    ${boardChoice('zip','ZIP',[['', 'Any ZIP']].concat(zips.map(z=>[z,z])))}
+    ${boardChoice('crew','Crew',[['', 'Any crew'],['__unassigned__','Unassigned']].concat(crews.map(c=>[c,c])))}
+    ${boardChoice('estimator','Estimator',[['', 'Any estimator']].concat(estimators.map(n=>[n,n])))}
+    ${boardChoice('dateField','Date field',[['updated',L.dateField.updated],['created',L.dateField.created],['job',L.dateField.job]])}
+    <div class="field"><label for="jobBoardDateFrom">From</label><input id="jobBoardDateFrom" type="date" value="${escape(f.dateFrom)}"></div>
+    <div class="field"><label for="jobBoardDateTo">To</label><input id="jobBoardDateTo" type="date" value="${escape(f.dateTo)}"></div>
+    <div class="field"><label for="jobBoardPriceMin">Customer total min</label><input id="jobBoardPriceMin" type="number" min="0" step="0.01" inputmode="decimal" value="${escape(f.priceMin)}"></div>
+    <div class="field"><label for="jobBoardPriceMax">Customer total max</label><input id="jobBoardPriceMax" type="number" min="0" step="0.01" inputmode="decimal" value="${escape(f.priceMax)}"></div>
+    ${boardChoice('sort','Sort',B.SORTS.map(s=>[s,L.sort[s]]))}
+    ${boardChoice('group','Group',B.GROUPS.map(s=>[s,L.group[s]]))}
+  </div>`;
+  const bulk=owner?`<div class="inline-actions"><button type="button" class="button danger" id="jobBoardDeleteSelected">Delete selected</button></div>`:'';
+  return `<section class="card job-board">${jobsDataBanner()}
+    <div class="field"><label for="jobBoardQuery">Search</label><input id="jobBoardQuery" type="search" value="${escape(f.q)}" placeholder="Customer, company, address, city, ZIP, job number, or phone" autocomplete="off"></div>
+    <p class="method-note" id="jobBoardCount">${escape(jobBoardCountText())}</p>
+    ${filters}
+    <div class="inline-actions"><label class="check-label"><input id="jobBoardShowArchived" data-board-filter="showArchived" type="checkbox" ${f.showArchived?'checked':''}> Show archived</label><button type="button" class="quiet" id="jobBoardReset">Reset filters</button></div>
+    <div id="jobBoardResults">${jobBoardResultsHTML()}</div>
+    ${bulk}
+    <div class="inline-actions"><button class="button" id="newJobKeep2">+ New job</button><button class="button secondary" id="backup2">${authMode()?'Download my jobs (JSON)':'Backup all JSON'}</button></div>
+    ${authMode()?'':`<div class="cloud-badge off">CLOUD SYNC OFF — not configured</div><p class="route-disclosure">Deleting site data clears jobs. Photos inflate storage — export backups before clearing.</p>`}
+  </section>`;
+}
+function ensureDeleteDialog(){
+  if(document.getElementById('jobDeleteDialog'))return;
+  const d=document.createElement('dialog');
+  d.id='jobDeleteDialog';
+  d.innerHTML='<h2 id="jobDeleteTitle">Delete job</h2><p id="jobDeleteCopy"></p><label class="field">Type <b id="jobDeleteExpect"></b> to confirm<input id="jobDeleteInput" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false"></label><div class="inline-actions"><button type="button" class="button secondary" id="jobDeleteCancel">Cancel</button><button type="button" class="button danger" id="jobDeleteConfirm" disabled>Delete</button></div>';
+  document.body.appendChild(d);
+}
+function openJobDelete(ids){
+  if(!isOwner()){toast('Only the owner can delete jobs.');return}
+  const jobs=(ids||[]).map(id=>state.jobs.find(j=>j.id===id)).filter(Boolean);
+  if(!jobs.length){toast('Select at least one job.');return}
+  const phrase=window.EsJobBoard.expectedDeletePhrase(jobs);
+  if(!phrase){toast('That job has no number to confirm.');return}
+  ensureDeleteDialog();
+  pendingDeleteIds=jobs.map(j=>j.id);
+  $('jobDeleteTitle').textContent=jobs.length===1?'Delete job':'Delete '+jobs.length+' jobs';
+  $('jobDeleteExpect').textContent=phrase;
+  $('jobDeleteCopy').textContent=jobs.length===1
+    ?'This permanently deletes '+jobs[0].number+' ('+(jobs[0].customer||jobs[0].company||'untitled')+'), its photos, its discount approvals, and an acceptance only when this job number is unique. This cannot be undone.'
+    :'This permanently deletes '+jobs.length+' jobs, their photos, their discount approvals, and acceptances linked by a unique job number. This cannot be undone.';
+  $('jobDeleteInput').value='';
+  $('jobDeleteConfirm').disabled=true;
+  $('jobDeleteDialog').showModal();
+}
+async function deleteJobsByIds(ids){
+  if(!isOwner()){toast('Only the owner can delete jobs.');return}
+  const jobs=(ids||[]).map(id=>state.jobs.find(j=>j.id===id)).filter(Boolean);
+  if(!jobs.length)return;
+  if(authMode()&&runtime.deleteJobs){
+    const server=jobs.map(j=>j._serverId).filter(Boolean);
+    if(server.length){
+      try{await runtime.deleteJobs(server)}
+      catch(e){toast(e.message||'Not deleted.');return}
+    }
+  }
+  const drop=new Set(jobs.map(j=>j.id));
+  state.jobs=state.jobs.filter(j=>!drop.has(j.id));
+  if(!state.jobs.some(j=>j.id===state.activeJobId))state.activeJobId=(state.jobs[0]&&state.jobs[0].id)||null;
+  jobs.forEach(j=>jobBoardSelected.delete(j.id));
+  if(!authMode())save();
+  render();
+  toast(jobs.length===1?'Job deleted.':jobs.length+' jobs deleted.');
+}
+async function toggleArchive(id){
+  if(!isOwner()){toast('Only the owner can archive or un-archive jobs.');return}
+  const j=state.jobs.find(x=>x.id===id);
+  if(!j)return;
+  const status=boardStatus(j);
+  const next=status==='archived'?(j.archivedFrom&&['draft','quoted','issued'].indexOf(j.archivedFrom)>=0?j.archivedFrom:'draft'):'archived';
+  if(next==='archived')j.archivedFrom=status;else delete j.archivedFrom;
+  j._status=next;
+  if(authMode()){
+    const preview=String(runtime.profile&&runtime.profile.id||'').indexOf('preview-')===0;
+    if(!j._serverId&&!preview){j._status=status;toast('Save the job before archiving.');return}
+    if(runtime.setJobStatus){
+      try{await runtime.setJobStatus(j)}
+      catch(e){j._status=status;toast(e.message||'Not changed.');return}
+    }
+  }
+  if(!authMode())save();
+  render();
+  toast(next==='archived'?'Archived.':'Restored.');
+}
+function handleJobBoardClick(t){
+  if(t.dataset.jobDelete){
+    if(!isOwner()){toast('Only the owner can delete jobs.');return true}
+    openJobDelete([t.dataset.jobDelete]);
+    return true;
+  }
+  if(t.dataset.jobArchive){
+    if(!isOwner()){toast('Only the owner can archive or un-archive jobs.');return true}
+    toggleArchive(t.dataset.jobArchive);
+    return true;
+  }
+  if(t.id==='jobBoardDeleteSelected'){
+    if(!isOwner()){toast('Only the owner can delete jobs.');return true}
+    const visible=new Set((window.EsJobBoard?boardView().jobs:[]).map(j=>j.id));
+    openJobDelete(Array.from(jobBoardSelected).filter(id=>visible.has(id)));
+    return true;
+  }
+  if(t.id==='jobDeleteCancel'){const d=$('jobDeleteDialog');if(d&&d.open)d.close();return true}
+  if(t.id==='jobDeleteConfirm'){
+    if(!isOwner()){toast('Only the owner can delete jobs.');return true}
+    const phrase=($('jobDeleteExpect')&&$('jobDeleteExpect').textContent)||'';
+    const typed=($('jobDeleteInput')&&$('jobDeleteInput').value)||'';
+    if(!window.EsJobBoard.phraseMatches(typed,phrase)){toast('Type the confirmation exactly.');return true}
+    const ids=pendingDeleteIds.slice();
+    const d=$('jobDeleteDialog');if(d&&d.open)d.close();
+    deleteJobsByIds(ids);
+    return true;
+  }
+  if(t.id==='addCrewName'){
+    if(!isOwner()){toast('Only the owner can edit the crew list.');return true}
+    const business=state.settings.business||(state.settings.business={});
+    if(!Array.isArray(business.crews))business.crews=[];
+    business.crews.push('');
+    render();
+    return true;
+  }
+  if(t.dataset.crewRemove!==undefined){
+    if(!isOwner()){toast('Only the owner can edit the crew list.');return true}
+    const crews=state.settings.business&&state.settings.business.crews;
+    if(Array.isArray(crews))crews.splice(Number(t.dataset.crewRemove),1);
+    if(!authMode())save({silent:true});
+    render();
+    return true;
+  }
+  if(t.id==='jobBoardReset'){
+    jobBoardFilters=window.EsJobBoard.defaultFilters();
+    persistBoardFilters();
+    render();
+    return true;
+  }
+  return false;
+}
+function jobsView(){
+  const owner=isOwner();
+  const preview=authMode()&&runtime.profile&&String(runtime.profile.id||'').indexOf('preview-')===0;
+  const sub=preview?'Offline demo data on this screen. Not loaded from the server.'
+    :(authMode()?(owner?'Search and filter every company job. Archive and delete stay on this account.':'Search and filter the jobs this account can already open.')
+    :'Search and filter jobs kept in this browser.');
+  const head=authMode()?heading('JOBS','Jobs.',sub,''):heading('LOCAL JOBS','Jobs.','Offline demo. Nothing here is loaded from a server.','');
+  const extra=authMode()&&runtime.jobsExtraHTML?runtime.jobsExtraHTML():'';
+  return head+extra+jobBoardHTML();
+}
+/* JOB_BOARD_END */
 
 
 async function getJSON(url){
@@ -2072,6 +2346,28 @@ function readPhotoFile(file, areaId, bucket){
 }
 document.addEventListener('input',e=>{
   const t=e.target;
+  if(t.id==='jobDeleteInput'){
+    const btn=$('jobDeleteConfirm');
+    const expect=($('jobDeleteExpect')&&$('jobDeleteExpect').textContent)||'';
+    if(btn)btn.disabled=!(window.EsJobBoard&&window.EsJobBoard.phraseMatches(t.value,expect));
+    return;
+  }
+  if(t.dataset.crewName!==undefined){
+    if(!isOwner()){toast('Only the owner can edit the crew list.');render();return}
+    const crews=state.settings.business&&state.settings.business.crews;
+    if(Array.isArray(crews))crews[Number(t.dataset.crewName)]=String(t.value||'').slice(0,80);
+    if(!authMode())save({silent:true});
+    return;
+  }
+  if(t.id&&LIVE_BOARD[t.id]){
+    boardFilters()[LIVE_BOARD[t.id]]=t.value;
+    persistBoardFilters();
+    const host=$('jobBoardResults');
+    if(host)host.innerHTML=jobBoardResultsHTML();
+    const count=$('jobBoardCount');
+    if(count)count.textContent=jobBoardCountText();
+    return;
+  }
   if(t.dataset.marginInput){
     const margin=t.value===''?0:Number(t.value);
     activeJob().markup=E.marginToMarkup(margin);
@@ -2153,6 +2449,30 @@ document.addEventListener('input',e=>{
 });
 document.addEventListener('change',e=>{
   const t=e.target;
+  if(t.dataset.boardFilter){
+    const key=t.dataset.boardFilter;
+    if(key==='showArchived')boardFilters().showArchived=!!t.checked;
+    else boardFilters()[key]=t.value;
+    persistBoardFilters();
+    render();
+    return;
+  }
+  if(t.dataset.jobCrew){
+    const j=state.jobs.find(x=>x.id===t.dataset.jobCrew);
+    if(j){
+      j.assignedCrew=String(t.value||'').trim().slice(0,80);
+      save();
+      const host=$('jobBoardResults');
+      if(host)host.innerHTML=jobBoardResultsHTML();
+    }
+    return;
+  }
+  if(t.dataset.jobSelect!==undefined){
+    if(!isOwner()){t.checked=false;return}
+    if(t.checked)jobBoardSelected.add(t.dataset.jobSelect);
+    else jobBoardSelected.delete(t.dataset.jobSelect);
+    return;
+  }
   if(t.matches('[data-add-photo]')){const f=t.files&&t.files[0];readPhotoFile(f,t.dataset.area,t.dataset.bucket);t.value='';return}
   if(t.id==='restore'||t.id==='restoreInline'){
     if(authMode()){toast('Restore is disabled while signed in.');t.value='';return}
@@ -2163,6 +2483,7 @@ document.addEventListener('change',e=>{
 document.addEventListener('click',e=>{
   const t=e.target.closest('button,label.photo-add');if(!t)return;
   if(authMode()&&runtime.onClick&&runtime.onClick(t,e)===true)return;
+  if(handleJobBoardClick(t))return;
   if(t.dataset.view)go(t.dataset.view);
   if(t.dataset.step)goStep(t.dataset.step);
   if(t.dataset.print)printDocument(t.dataset.print);
@@ -2174,7 +2495,7 @@ document.addEventListener('click',e=>{
   if(t.dataset.addRect!==undefined){activeJob().areas[Number(t.dataset.addRect)].rectangles.push({length:0,width:0});render()}
   if(t.dataset.delRect!==undefined){const a=activeJob().areas[Number(t.dataset.areaIndex)];a.rectangles.splice(Number(t.dataset.delRect),1);if(!a.rectangles.length)a.rectangles.push({length:0,width:0});syncAreaSqft(a);render()}
   if(t.dataset.delPhoto){const area=activeJob().areas.find(a=>a.id===t.dataset.area);if(area){const gone=(area[t.dataset.bucket]||[]).filter(p=>p.id===t.dataset.delPhoto);area[t.dataset.bucket]=(area[t.dataset.bucket]||[]).filter(p=>p.id!==t.dataset.delPhoto);if(authMode()&&runtime.photoRemoved)gone.forEach(runtime.photoRemoved);render()}}
-  if(t.dataset.switchJob){state.activeJobId=t.dataset.switchJob;render();toast('Switched job')}
+  if(t.dataset.switchJob){state.activeJobId=t.dataset.switchJob;if(state.view==='jobs'&&t.classList.contains('job-card-open')){go('guided');toast('Opened job')}else{render();toast('Switched job')}}
   if(t.dataset.colorKey!==undefined){const a=activeJob().areas[Number(t.dataset.areaIndex)];a.colorKey=t.dataset.colorKey;applyColorFields(a);render()}
   if(t.dataset.flakeBlend!==undefined){const a=activeJob().areas[Number(t.dataset.areaIndex)];a.flakeBlend=t.dataset.flakeBlend;applyColorFields(a);render()}
   if(t.dataset.projectType){
@@ -2228,6 +2549,7 @@ window.GuidedApp={get state(){return state},calc,ensureJob,guidedJob,nextJobNumb
 /** v7: the page decides the mode. demo -> local storage (NOT SECURE). auth -> rt.profile/settings/jobs from server. */
 function boot(rt){
   runtime=rt||{mode:'demo'};
+  ensureDeleteDialog();
   if(authMode()){
     state.settings=deepMergeSettings(rt.settings||{});if(rt.settings&&rt.settings._redacted)state.settings._redacted=true;
     state.jobs=(rt.jobs||[]).map(guidedJob);

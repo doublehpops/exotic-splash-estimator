@@ -55,7 +55,63 @@ function create(client,opts){
     },
     async priceAudit(limit){return unwrap(await client.rpc('owner_price_book_audit',{p_limit:limit||50}))||[]},
     /* ---------- jobs ---------- */
-    async listJobs(){return unwrap(await client.from('jobs').select(JOB_COLS).neq('status','archived').order('updated_at',{ascending:false}))||[]},
+    async listJobs(opts){
+      let q=client.from('jobs').select(JOB_COLS);
+      if(!(opts&&opts.includeArchived))q=q.neq('status','archived');
+      return unwrap(await q.order('updated_at',{ascending:false}))||[];
+    },
+    async setJobStatus(id,expectedVersion,status,jobData){
+      const allowed=['draft','quoted','issued','archived'];
+      if(!allowed.includes(status))throw new CloudError('input','Unknown job status.');
+      const patch={status:status};
+      if(jobData)patch.job_data=jobData;
+      const rows=unwrap(await client.from('jobs').update(patch).eq('id',id).eq('version',expectedVersion).select(JOB_COLS));
+      if(!rows||!rows.length)throw new CloudError('conflict','Job was changed elsewhere, or your access changed. Reload jobs before trying again.');
+      return rows[0];
+    },
+    /* List every object in the job-photos folder <jobId>/ and remove those paths
+     * through the Storage API. Never delete from storage.objects in SQL:
+     * protect_objects_delete rejects that and rolls the job delete back. */
+    async removeJobPhotos(jobId){
+      const folder=String(jobId||'').replace(/^\/+|\/+$/g,'');
+      if(!folder)throw new CloudError('input','Job id is required to remove photos.');
+      const paths=[];
+      const limit=100;
+      for(let offset=0;offset<=10000;offset+=limit){
+        const r=await client.storage.from(PHOTO_BUCKET).list(folder,{limit,offset,sortBy:{column:'name',order:'asc'}});
+        if(r.error)throw friendly(r.error);
+        const rows=r.data||[];
+        for(const row of rows){
+          if(!row||!row.name||row.name==='.emptyFolderPlaceholder')continue;
+          if(row.id==null&&row.metadata==null)continue;
+          paths.push(folder+'/'+row.name);
+        }
+        if(rows.length<limit)break;
+      }
+      for(let i=0;i<paths.length;i+=100){
+        const chunk=paths.slice(i,i+100);
+        const r=await client.storage.from(PHOTO_BUCKET).remove(chunk);
+        if(r.error)throw friendly(r.error);
+      }
+      return paths;
+    },
+    async deleteJobs(ids){
+      const list=[];
+      for(const id of (Array.isArray(ids)?ids:[])){
+        const s=String(id||'');
+        if(s&&list.indexOf(s)<0)list.push(s);
+      }
+      if(!list.length)throw new CloudError('input','Choose at least one job.');
+      for(const id of list){
+        try{await api.removeJobPhotos(id)}
+        catch(err){
+          const detail=err&&err.message?err.message:'Storage request failed';
+          throw new CloudError(err&&err.code||'error','Photos could not be removed, so the job was not deleted. '+detail,err);
+        }
+      }
+      return unwrap(await client.rpc('owner_delete_jobs',{p_job_ids:list}));
+    },
+    async staffDirectory(){return unwrap(await client.rpc('staff_directory'))||[]},
     async insertJob(clientRef,jobData){return unwrap(await client.from('jobs').insert({client_ref:clientRef,job_data:jobData}).select(JOB_COLS).single())},
     async updateJob(id,expectedVersion,jobData){
       const rows=unwrap(await client.from('jobs').update({job_data:jobData}).eq('id',id).eq('version',expectedVersion).select(JOB_COLS));
