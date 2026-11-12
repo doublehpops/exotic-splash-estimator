@@ -289,7 +289,13 @@ function toast(m){const g=G();if(g&&g.toast)g.toast(m);else W.alert(m)}
 let previewTimer=null,previewKey=null,previewBusy=false,lastPreviewError=null;
 async function discountCall(body){
   body=body||{};
-  return cloud.quote(body.mode,body.job_id,body.job_data,{amount:body.amount,percent:body.percent,reason:body.reason,id:body.id,decision:body.decision,estimateId:body.estimateId||body.job_id});
+  return serverQuote(body.mode,body.job_id,body.job_data,{amount:body.amount,percent:body.percent,reason:body.reason,id:body.id,decision:body.decision,estimateId:body.estimateId||body.job_id});
+}
+function serverQuote(mode,jobId,jobData,extra){
+  return W.EsCloud.quoteWithPriceBookReload(
+    ()=>cloud.quote(mode,jobId,jobData,extra),
+    reloadPriceBookQuiet
+  );
 }
 function requestPreview(j,key,force){
   if(!rt||(!force&&previewKey===key))return;
@@ -302,7 +308,7 @@ async function runPreview(jobId,key){
   if(G().quoteKey(j)!==key){previewKey=null;return}
   previewBusy=true;
   try{
-    const res=await cloud.quote('preview',j._serverId||null,G().quoteInput(j));
+    const res=await serverQuote('preview',j._serverId||null,G().quoteInput(j));
     G().setServerQuote(jobId,key,res.staff);
     if(res.discountOverCap)toast('Adjustment is over the owner-approved limit — the server will refuse to finalize this quote.');
     lastPreviewError=null;refreshView();
@@ -349,11 +355,21 @@ async function savePriceBook(){
     toast('Price book saved (v'+v+'). Employees get it on their next load.');G().render();
   }catch(e){toast(e.code==='conflict'?'Price book was changed elsewhere — reload, then re-apply your edits.':e.message)}
 }
+function applyLoadedPriceBook(pb){
+  const owner=rt.profile.role==='owner';
+  const settings=owner?Q().buildSettings(E(),pb&&pb.staff_settings,pb&&pb.owner_settings):Q().redactedStaffSettings(E(),pb&&pb.staff_settings);
+  G().state.settings=settings;
+  rt.priceBook={version:pb?pb.version:null,updatedAt:pb?pb.updated_at:null,ownerEmpty:owner?isEmptyBook(pb):null,sig:owner?bookSig(settings):null};
+  if(G().serverQuotes){for(const k of Object.keys(G().serverQuotes))delete G().serverQuotes[k];}
+}
+async function reloadPriceBookQuiet(){
+  const pb=rt.profile.role==='owner'?await cloud.loadOwnerPriceBook():await cloud.loadStaffPriceBook();
+  applyLoadedPriceBook(pb);
+}
 async function reloadPriceBook(){
   if(bookSig(G().state.settings)!==rt.priceBook.sig&&!W.confirm('Discard unsaved price-book changes?'))return;
   const pb=await cloud.loadOwnerPriceBook();
-  G().state.settings=Q().buildSettings(E(),pb.staff_settings,pb.owner_settings);
-  rt.priceBook={version:pb.version,updatedAt:pb.updated_at,ownerEmpty:isEmptyBook(pb),sig:bookSig(G().state.settings)};
+  applyLoadedPriceBook(pb);
   G().render();toast('Price book reloaded (v'+pb.version+').');
 }
 
@@ -392,7 +408,7 @@ async function refreshApprovalBadge(){
 async function decideFromInbox(id,estimateId,decision){
   if(decision==='reject'&&!W.confirm('Reject this discount request? The customer total stays unchanged.'))return;
   try{
-    const res=await cloud.quote('discount-decide',estimateId,null,{id,decision,estimateId});
+    const res=await serverQuote('discount-decide',estimateId,null,{id,decision,estimateId});
     const j=G().state.jobs.find(x=>x._serverId===estimateId);
     if(j){j.discountServerStatus=(res.request&&res.request.status)||(decision==='approve'?'approved':'rejected');delete G().serverQuotes[j.id];onSave(j)}
     toast(decision==='approve'?'Approved. The reduction applies to that estimate revision and tier.':'Rejected.');
@@ -435,7 +451,7 @@ async function createShare(){
   dirty.add(j.id);await flush();
   if(dirty.has(j.id)){toast('Save the job first (see status).');return}
   try{
-    const rec=await cloud.quote('record',j._serverId,null,{sanityContinue:!!gate.acked});
+    const rec=await serverQuote('record',j._serverId,null,{sanityContinue:!!gate.acked});
     if(!rec.customer||!rec.customer.quoteReady){toast('Server says the quote is still Pending — link not created.');return}
     const days=Number(($('esShareDays')||{}).value)||30;
     const s=await cloud.createShare(j._serverId,days);
