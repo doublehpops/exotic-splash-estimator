@@ -121,6 +121,13 @@ function approvedAdjustmentCap(settings,x){
   if(a.mode==='pct')return Math.max(0,Math.round(capBase(x)*(a.pct/100)*100)/100);
   return Math.max(0,a.amount);
 }
+/** Amount server_record_quote stores when a consumed approval matches this snapshot. */
+function recordedDiscountAmount(snapshot){
+  const raw=snapshot&&snapshot.totals?snapshot.totals.discount:0;
+  const x=Number(raw);
+  if(!Number.isFinite(x)||x<0)return 0;
+  return Math.round(x*100)/100;
+}
 function customerVisibleLines(x){
   return (x.lines||[]).filter(l=>{const k=l.kind||'';return k!=='mileage'&&k!=='travel'&&k!=='equipment'&&k!=='overhead'&&k!=='equip'});
 }
@@ -342,7 +349,7 @@ async function handleQuoteRequest(body,deps,E){
   }
 }
 
-return{CORE_VERSION,STAFF_SECTIONS,OWNER_SECTIONS,merge,deepMergeSettings,splitSettings,buildSettings,redactedStaffSettings,
+return{CORE_VERSION,STAFF_SECTIONS,OWNER_SECTIONS,merge,deepMergeSettings,splitSettings,buildSettings,redactedStaffSettings,recordedDiscountAmount,
   prepareJob,jobForTransport,applyEmployeeLocks,computeAreaSqft,approvedAdjustment,approvedAdjustmentCap,capBase,
   customerVisibleLines,quoteAllocation,staffWarnings,staffSnapshot,internalSnapshot,customerSnapshot,computeQuote,handleQuoteRequest,HttpError};
 });
