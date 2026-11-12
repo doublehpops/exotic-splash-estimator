@@ -55,7 +55,22 @@ function create(client,opts){
     },
     async priceAudit(limit){return unwrap(await client.rpc('owner_price_book_audit',{p_limit:limit||50}))||[]},
     /* ---------- jobs ---------- */
-    async listJobs(){return unwrap(await client.from('jobs').select(JOB_COLS).neq('status','archived').order('updated_at',{ascending:false}))||[]},
+    async listJobs(opts){
+      let q=client.from('jobs').select(JOB_COLS);
+      if(!(opts&&opts.includeArchived))q=q.neq('status','archived');
+      return unwrap(await q.order('updated_at',{ascending:false}))||[];
+    },
+    async setJobStatus(id,expectedVersion,status,jobData){
+      const allowed=['draft','quoted','issued','archived'];
+      if(!allowed.includes(status))throw new CloudError('input','Unknown job status.');
+      const patch={status:status};
+      if(jobData)patch.job_data=jobData;
+      const rows=unwrap(await client.from('jobs').update(patch).eq('id',id).eq('version',expectedVersion).select(JOB_COLS));
+      if(!rows||!rows.length)throw new CloudError('conflict','Job was changed elsewhere, or your access changed. Reload jobs before trying again.');
+      return rows[0];
+    },
+    async deleteJobs(ids){return unwrap(await client.rpc('owner_delete_jobs',{p_job_ids:ids}))},
+    async staffDirectory(){return unwrap(await client.rpc('staff_directory'))||[]},
     async insertJob(clientRef,jobData){return unwrap(await client.from('jobs').insert({client_ref:clientRef,job_data:jobData}).select(JOB_COLS).single())},
     async updateJob(id,expectedVersion,jobData){
       const rows=unwrap(await client.from('jobs').update({job_data:jobData}).eq('id',id).eq('version',expectedVersion).select(JOB_COLS));

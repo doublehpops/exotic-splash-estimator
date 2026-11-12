@@ -116,14 +116,23 @@ async function enterApp(){
     let pb,settings;
     if(owner){pb=await cloud.loadOwnerPriceBook();settings=Q().buildSettings(E(),pb&&pb.staff_settings,pb&&pb.owner_settings)}
     else{pb=await cloud.loadStaffPriceBook();settings=Q().redactedStaffSettings(E(),pb&&pb.staff_settings)}
-    const rows=await cloud.listJobs();
+    const rows=await cloud.listJobs({includeArchived:true});
     const markups={};
     if(owner){for(const m of await cloud.listJobMarkups())markups[m.job_id]=Number(m.markup_pct)}
+    let estimatorDirectory={};
+    try{
+      const people=await cloud.staffDirectory();
+      for(const p of people||[]){
+        if(p&&p.id&&p.displayName)estimatorDirectory[p.id]=String(p.displayName);
+      }
+    }catch(e){estimatorDirectory={}}
     const jobs=rows.map(r=>rowToJob(r,owner?markups[r.id]:undefined,settings));
     applyOutbox(profile.id,jobs);
     rt={mode:'auth',profile,settings,jobs,priceBook:{version:pb?pb.version:null,updatedAt:pb?pb.updated_at:null,ownerEmpty:owner?isEmptyBook(pb):null,sig:owner?bookSig(settings):null},
       syncStatus:'connected',onSave,requestPreview,discountCall,onClick,priceBookPanelHTML,sharePanelHTML,staffViewHTML,jobsExtraHTML,approvalsViewHTML,photoSrc,photoRemoved,
-      shares:{},newShare:null,staffList:null,audit:null,localScan:null,approvals:null,approvalFilter:'pending',approvalsPending:0,acceptances:null};
+      shares:{},newShare:null,staffList:null,audit:null,localScan:null,approvals:null,approvalFilter:'pending',approvalsPending:0,acceptances:null,estimatorDirectory};
+    rt.deleteJobs=deleteJobs;
+    rt.setJobStatus=setJobStatus;
     $('gate').hidden=true;$('appRoot').hidden=false;
     D.body.classList.add('mode-auth');D.body.classList.remove('mode-demo');
     decorateShell();
@@ -140,7 +149,7 @@ function rowToJob(r,markup,settings){
   const d=Object.assign({},r.job_data||{});
   d.id=d.id||r.client_ref||r.id;
   if(r.job_number)d.number=r.job_number; // server-assigned ES-YYYYMMDD-NN wins over the client's provisional number
-  d._serverId=r.id;d._version=r.version;d._status=r.status;d._createdBy=r.created_by;d._clientRef=r.client_ref;d._updatedAt=r.updated_at;
+  d._serverId=r.id;d._version=r.version;d._status=r.status;d._createdBy=r.created_by;d._assignedStaff=Array.isArray(r.assigned_staff)?r.assigned_staff.slice():[];d._clientRef=r.client_ref;d._updatedAt=r.updated_at;
   if(markup!==undefined){d.markup=markup;d._markup=markup}
   else if(settings&&settings.costs&&!settings._redacted){d.markup=Number(settings.costs.markup)||0;d._markup=null}
   return d;
@@ -510,10 +519,24 @@ function importLocal(){
     j._local=true;G().state.jobs.unshift(j);dirty.add(j.id)}
   rt.localScan=null;setSync('saving…');scheduleFlush(100);G().render();toast(picks.length+' job(s) queued for upload. Local copies kept.');
 }
+async function setJobStatus(j){
+  if(!rt||rt.profile.role!=='owner')throw new Error('Only the owner can archive or un-archive jobs.');
+  if(String(rt.profile.id||'').indexOf('preview-')===0)return {id:j._serverId,status:j._status,version:j._version||1};
+  const row=await cloud.setJobStatus(j._serverId,j._version,j._status,jobPayload(j));
+  applyRow(j,row);
+  j._status=row.status;
+  j._savedSig=jobSig(j);
+  return row;
+}
+async function deleteJobs(ids){
+  if(!rt||rt.profile.role!=='owner')throw new Error('Only the owner can delete jobs.');
+  if(String(rt.profile.id||'').indexOf('preview-')===0)return {ok:true,preview:true};
+  return cloud.deleteJobs(ids);
+}
 async function reloadJobs(){
   if(dirty.size&&!W.confirm('Unsaved changes will be replaced by the server copy. Continue?'))return;
   dirty.clear();const owner=rt.profile.role==='owner';
-  const rows=await cloud.listJobs();const mk={};if(owner)for(const m of await cloud.listJobMarkups())mk[m.job_id]=Number(m.markup_pct);
+  const rows=await cloud.listJobs({includeArchived:true});const mk={};if(owner)for(const m of await cloud.listJobMarkups())mk[m.job_id]=Number(m.markup_pct);
   G().state.jobs=rows.map(r=>G().guidedJob(rowToJob(r,owner?mk[r.id]:undefined,G().state.settings)));
   for(const j of G().state.jobs)j._savedSig=jobSig(j);
   G().state.activeJobId=(G().state.jobs[0]||{}).id||null;
@@ -597,7 +620,24 @@ function localPreview(){
   if(host!=='localhost'&&host!=='127.0.0.1')return '';
   return new URLSearchParams(W.location.search).get('preview')||'';
 }
-/* Localhost-only fixture so the phone layout can be reviewed without a production sign-in. */
+/* Localhost-only fixture so the phone layout can be reviewed without a production sign-in.
+ * Job rows are illustrative offline data, not a server load. */
+function previewBoardJobs(){
+  const base=over=>Object.assign({
+    isSample:true,sampleLabel:'OFFLINE DEMO',
+    email:'sample.customer@example.com',origin:'211 W. Wacker Drive, Ste 120, Chicago, IL 60606',
+    miles:0,minutes:0,visits:3,vehicles:1,crew:3,method:'rates',projectType:'floor',priceOption:'regular',
+    areas:[{name:'Floor',sqftMode:'manual',sqft:450,style:'flake',moisture:false}]
+  },over);
+  return [
+    base({id:'demo-rivera',number:'ES-20261101-01',customer:'Alex Rivera',company:'Rivera Auto Care',phone:'312-555-0148',address:'1200 W Hubbard St, Chicago, IL 60622',city:'Chicago',projectType:'floor',areas:[{name:'Shop floor',sqftMode:'manual',sqft:450,style:'flake',moisture:false}],priceOption:'regular',assignedCrew:'North crew',_status:'quoted',_createdBy:'preview-owner',_estimatorName:'Preview Owner',date:'2026-11-01',createdAt:'2026-11-01T15:00:00.000Z',updatedAt:'2026-11-11T15:00:00.000Z',_updatedAt:'2026-11-11T15:00:00.000Z'}),
+    base({id:'demo-hall',number:'ES-20261102-02',customer:'North Hall Cafe',company:'North Hall Cafe',phone:'312-555-0190',address:'44 N Halsted St, Chicago, IL 60612',city:'Chicago',projectType:'garage',garagePackage:'2car',garageStyle:'flake',garageTopcoat:'protective',garageCondition:'good',areas:[],priceOption:'regular',assignedCrew:'South crew',_status:'issued',_createdBy:'preview-staff',_estimatorName:'Sam Ellis',date:'2026-11-04',createdAt:'2026-11-02T12:00:00.000Z',updatedAt:'2026-11-10T18:00:00.000Z',_updatedAt:'2026-11-10T18:00:00.000Z'}),
+    base({id:'demo-oak',number:'ES-20261103-03',customer:'Oak Park Library',company:'',phone:'708-555-0133',address:'834 Lake St, Oak Park, IL 60302',city:'Oak Park',projectType:'floor',areas:[{name:'Reading room',sqftMode:'manual',sqft:100,style:'solid',moisture:false}],priceOption:'opt2',assignedCrew:'Garage crew',_status:'draft',_createdBy:'preview-staff',_estimatorName:'Sam Ellis',date:'2026-10-20',createdAt:'2026-10-18T12:00:00.000Z',updatedAt:'2026-11-03T12:00:00.000Z',_updatedAt:'2026-11-03T12:00:00.000Z'}),
+    base({id:'demo-cicero',number:'ES-20261104-04',customer:'Cicero Metals',company:'Cicero Metals',phone:'312-555-0177',address:'5000 W Cermak Rd, Cicero, IL 60804',city:'Cicero',projectType:'floor',areas:[{name:'Showroom',sqftMode:'manual',sqft:1200,style:'metallic',moisture:false}],priceOption:'opt1',assignedCrew:'North crew',_status:'quoted',_createdBy:'preview-owner',_estimatorName:'Preview Owner',date:'2026-11-08',createdAt:'2026-11-05T12:00:00.000Z',updatedAt:'2026-11-09T12:00:00.000Z',_updatedAt:'2026-11-09T12:00:00.000Z'}),
+    base({id:'demo-pilsen',number:'ES-20261105-05',customer:'Pilsen Studio',company:'Pilsen Studio',phone:'773-555-0160',address:'1800 S Ashland Ave, Chicago, IL 60608',city:'Chicago',projectType:'garage',garagePackage:'2car',garageStyle:'solid',garageTopcoat:'protective',garageCondition:'good',areas:[],priceOption:'regular',assignedCrew:'',_status:'draft',_createdBy:'preview-owner',_estimatorName:'Preview Owner',date:'2026-11-06',createdAt:'2026-11-06T12:00:00.000Z',updatedAt:'2026-11-07T12:00:00.000Z',_updatedAt:'2026-11-07T12:00:00.000Z'}),
+    base({id:'demo-west',number:'ES-20261106-06',customer:'West Town Lofts',company:'West Town Lofts',phone:'708-555-0122',address:'1550 N Milwaukee Ave, Chicago, IL 60622',city:'Chicago',projectType:'garage',garagePackage:'1car',garageStyle:'solid',garageTopcoat:'protective',garageCondition:'good',areas:[],priceOption:'opt1',assignedCrew:'South crew',_status:'archived',archivedFrom:'quoted',_createdBy:'preview-staff',_estimatorName:'Sam Ellis',date:'2026-09-15',createdAt:'2026-09-15T12:00:00.000Z',updatedAt:'2026-10-01T12:00:00.000Z',_updatedAt:'2026-10-01T12:00:00.000Z'})
+  ];
+}
 function startPreview(kind){
   if(kind==='login'){
     cloud={signIn:async()=>{throw new Error('Sign-in failed. Check email and password, or ask the owner whether your account is approved.')},requestPasswordReset:async()=>true,signOut:async()=>{},getSession:async()=>null,onAuthChange(){return{unsubscribe(){}}}};
@@ -606,8 +646,11 @@ function startPreview(kind){
   }
   const q=new URLSearchParams(W.location.search);
   const fresh=q.get('fresh')==='1';
-  const sample={customer:'Jordan Lee',email:'jordan@example.com',phone:'312-555-0148',address:'1200 W Hubbard St, Chicago, IL',areas:[{name:'Floor area',sqftMode:'rectangles',rectangles:[{length:20,width:15}],sqft:300,style:'solid',moisture:false}]};
-  rt={mode:'auth',profile:{id:'preview-owner',email:'owner@example.com',full_name:'Preview Owner',role:'owner',active:true},settings:E().defaults,jobs:fresh?[]:[sample],syncStatus:'saved',
+  const employee=kind==='employee';
+  const settings=JSON.parse(JSON.stringify(E().defaults));
+  settings.business.crews=['North crew','South crew','Garage crew'];
+  rt={mode:'auth',profile:{id:employee?'preview-staff':'preview-owner',email:employee?'sam@example.com':'owner@example.com',full_name:employee?'Sam Ellis':'Preview Owner',role:employee?'employee':'owner',active:true},settings,jobs:fresh?[]:previewBoardJobs(),syncStatus:'saved',
+    estimatorDirectory:{'preview-owner':'Preview Owner','preview-staff':'Sam Ellis'},
     onSave(){D.querySelectorAll('.save-pill').forEach(el=>{el.textContent='Saving…';el.dataset.state='saving'});clearTimeout(startPreview._t);startPreview._t=setTimeout(()=>D.querySelectorAll('.save-pill').forEach(el=>{el.textContent='Saved';el.dataset.state='saved'}),450)},
     requestPreview(){},discountCall:async()=>({ok:false,error:'Preview only'}),
     onClick(t){if(t.dataset.view==='staff'){G().go('staff');return true}if(t.dataset.view==='approvals'){G().go('approvals');return true}return false},
@@ -621,6 +664,7 @@ function startPreview(kind){
       {id:'preview-staff',email:'sam@example.com',full_name:'Sam Ellis',role:'employee',active:true}
     ],shares:{},newShare:null,audit:null,localScan:null};
   rt.staffViewHTML=staffViewHTML;rt.approvalsViewHTML=approvalsViewHTML;rt.jobsExtraHTML=jobsExtraHTML;
+  rt.deleteJobs=deleteJobs;rt.setJobStatus=setJobStatus;
   $('gate').hidden=true;$('appRoot').hidden=false;
   D.body.classList.add('mode-auth');D.body.classList.remove('mode-demo');
   decorateShell();
@@ -632,7 +676,7 @@ function startPreview(kind){
 }
 function start(){
   const preview=localPreview();
-  if(preview==='login'||preview==='owner'){startPreview(preview);return}
+  if(preview==='login'||preview==='owner'||preview==='employee'){startPreview(preview);return}
   let demoFlag=false;try{demoFlag=W.sessionStorage.getItem(DEMO_FLAG)==='1'}catch{}
   if(demoFlag&&demoAllowed()){startDemo();return}
   if(cfg.state==='unconfigured'){showUnconfigured();return}

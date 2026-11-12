@@ -157,3 +157,33 @@ table.doc-options,
 .rate-row input{flex:1 1 120px;min-width:0}
 .rate-hint{font-size:12px;line-height:1.4;color:var(--muted)}
 .rate-error{margin-top:8px}
+.fields.job-board-filters{grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-top:8px}
+.job-board-count{margin:4px 0 0}
+.job-board-list{display:grid;gap:10px}
+.job-card{border:1px solid var(--line);border-radius:10px;background:#fff;padding:12px 14px;display:grid;gap:8px}
+.job-card.active{border-color:var(--green);background:#f4f8f1}
+.job-card-top{display:flex;gap:10px;align-items:flex-start}
+.job-card-open{flex:1;min-width:0;text-align:left;background:transparent;padding:0;display:grid;gap:3px}
+.job-card-open b{font-size:14px;line-height:1.35}
+.job-card-open small{color:var(--muted);font-size:11px;line-height:1.4}
+.job-card-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px 12px;margin:0}
+.job-card-meta div{min-width:0}
+.job-card-meta dt{font-size:10px;letter-spacing:.4px;text-transform:uppercase;color:var(--muted);font-weight:700}
+.job-card-meta dd{margin:2px 0 0;font-size:13px}
+.job-card-meta select{width:100%;min-height:40px;border:1px solid #dbe1da;border-radius:6px;background:#fcfcfa;padding:8px}
+.job-pick{margin:2px 0 0}
+.job-pick input{width:18px;height:18px;accent-color:var(--green)}
+.job-group-label{font:700 13px Manrope,Arial;color:var(--green);margin:14px 0 0}
+.job-card-actions{margin-top:2px}
+.button.danger{background:#a43b35;border-color:#a43b35;color:#fff}
+.button.danger:hover{background:#8d312c}
+.crew-settings{display:grid;gap:8px;margin-top:14px}
+.crew-settings h4{margin:0;font-size:13px}
+.crew-row input{flex:1;min-width:0;border:1px solid #dbe1da;border-radius:6px;padding:10px 12px;background:#fcfcfa}
+#jobDeleteDialog .field{display:flex;flex-direction:column;gap:8px;margin:12px 0}
+@media(max-width:700px){
+  .fields.job-board-filters{grid-template-columns:1fr}
+  .job-card-meta{grid-template-columns:1fr 1fr}
+  .job-card-open b{font-size:16px}
+  .job-card-actions .quiet,.job-card-actions .button{flex:1;min-height:44px}
+}
