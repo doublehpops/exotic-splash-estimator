@@ -3,7 +3,8 @@ name: Post-deploy smoke
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -11,16 +12,16 @@ permissions:
 jobs:
   smoke:
     runs-on: ubuntu-latest
+    env:
+      QUOTE_JOB_SMOKE_URL: ${{ secrets.QUOTE_JOB_SMOKE_URL }}
+      QUOTE_JOB_SMOKE_TOKEN: ${{ secrets.QUOTE_JOB_SMOKE_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: "22"
       - name: Engine prices on fixture jobs
         run: node tools/smoke-prices.js
       - name: Live quote-job
-        if: ${{ secrets.QUOTE_JOB_SMOKE_URL != '' && secrets.QUOTE_JOB_SMOKE_TOKEN != '' }}
-        env:
-          QUOTE_JOB_SMOKE_URL: ${{ secrets.QUOTE_JOB_SMOKE_URL }}
-          QUOTE_JOB_SMOKE_TOKEN: ${{ secrets.QUOTE_JOB_SMOKE_TOKEN }}
+        if: env.QUOTE_JOB_SMOKE_URL != '' && env.QUOTE_JOB_SMOKE_TOKEN != ''
         run: node tools/smoke-live-quote.js

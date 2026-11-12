@@ -290,9 +290,6 @@ async function handleQuoteRequest(body,deps,E){
     delete jobData.discountApproval;
     jobData.discount=0;
     const pb=await deps.getPriceBook();
-    if(body.priceBookVersion!=null&&body.priceBookVersion!==''&&Number(body.priceBookVersion)!==Number(pb.version)){
-      return{status:409,body:{ok:false,code:'price_book_version_mismatch',error:'Price book version mismatch',priceBookVersion:pb.version}};
-    }
     const markup=stored?await deps.getJobMarkup(stored.id):null;
     let {settings,job,x}=computeQuote(E,{jobData,staffSettings:pb.staff_settings,ownerSettings:pb.owner_settings,markupPct:markup});
     const DA=discountApi();
@@ -359,6 +356,7 @@ async function handleQuoteRequest(body,deps,E){
     if(e instanceof HttpError)return{status:e.status,body:{ok:false,code:e.code,error:e.message}};
     const msg=String(e&&e.message||e);
     if(/exceeds the owner-approved adjustment limit/i.test(msg))return{status:422,body:{ok:false,code:'discount_over_cap',error:'Discount exceeds the owner-approved adjustment limit'}};
+    if(/price book changed/i.test(msg))return{status:409,body:{ok:false,code:'conflict',error:'Price book version mismatch'}};
     if(/changed since|changed during/i.test(msg))return{status:409,body:{ok:false,code:'conflict',error:'Job or price book changed — retry'}};
     if(/cannot access|disabled/i.test(msg))return{status:403,body:{ok:false,code:'forbidden',error:'Not allowed'}};
     return{status:500,body:{ok:false,code:'server_error',error:'Quote calculation failed'}};

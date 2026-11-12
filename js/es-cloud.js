@@ -74,7 +74,7 @@ function create(client,opts){
         let detail=null;try{detail=r.error.context&&typeof r.error.context.json==='function'?await r.error.context.json():null}catch{}
         if(detail&&detail.code==='discount_over_cap')throw new CloudError('discount_over_cap','Discount exceeds the owner-approved adjustment limit.');
         if(detail&&detail.code==='forbidden')throw new CloudError('forbidden','Account is not active staff.');
-        if(detail&&detail.code==='price_book_version_mismatch')throw new CloudError('price_book_version_mismatch','Price book version mismatch.',detail);
+        if(detail&&detail.code==='conflict'&&/version mismatch/i.test(String(detail.error||'')))throw new CloudError('stale_book',String(detail.error));
         if(detail&&detail.code==='conflict')throw new CloudError('conflict','Job or price book changed — retry.');
         throw friendly(detail&&detail.error?{message:detail.error}:r.error);
       }
@@ -122,7 +122,7 @@ async function quoteWithPriceBookReload(quote,reload){
   try{
     return await quote();
   }catch(err){
-    if(!err||err.code!=='price_book_version_mismatch')throw err;
+    if(!err||err.code!=='stale_book')throw err;
     await reload();
     return await quote();
   }

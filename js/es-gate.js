@@ -293,7 +293,7 @@ async function discountCall(body){
 }
 function serverQuote(mode,jobId,jobData,extra){
   return W.EsCloud.quoteWithPriceBookReload(
-    ()=>cloud.quote(mode,jobId,jobData,Object.assign({},extra||{},{priceBookVersion:rt&&rt.priceBook?rt.priceBook.version:null})),
+    ()=>cloud.quote(mode,jobId,jobData,extra),
     reloadPriceBookQuiet
   );
 }

@@ -27,7 +27,7 @@ check('shared quote core stays byte-identical',()=>{
 
 function mismatch(message){
   const err=new Error(message||'Price book version mismatch');
-  err.code='price_book_version_mismatch';
+  err.code='stale_book';
   return err;
 }
 
@@ -64,7 +64,7 @@ checkAsync('a second mismatch is shown and does not reload again',async()=>{
   let caught=null;
   try{await Cloud.quoteWithPriceBookReload(quote,reload);}catch(e){caught=e;}
   assert.ok(caught);
-  assert.strictEqual(caught.code,'price_book_version_mismatch');
+  assert.strictEqual(caught.code,'stale_book');
   assert.strictEqual(reloads,1);
   assert.strictEqual(quotes,2);
 });
@@ -89,19 +89,32 @@ function client(invoke){
   return {auth:{},functions:{invoke}};
 }
 
-checkAsync('the quote client sends the book version and names a mismatch',async()=>{
+check('quote does not take a client price-book version',()=>{
+  const src=fs.readFileSync(path.join('js','quote-core.js'),'utf8');
+  const cloud=fs.readFileSync(path.join('js','es-cloud.js'),'utf8');
+  assert.ok(!/body\.price_book_version|body\.priceBookVersion/.test(src));
+  const quoteFn=cloud.slice(cloud.indexOf('async quote('),cloud.indexOf('async createShare'));
+  assert.ok(!/priceBookVersion|price_book_version|expectedVersion/.test(quoteFn));
+});
+
+checkAsync('the quote client names a price-book mismatch and leaves a job conflict alone',async()=>{
   let body=null;
   const api=Cloud.create(client(async(_name,opts)=>{
     body=opts.body;
-    return {error:{context:{json:async()=>({ok:false,code:'price_book_version_mismatch',error:'Price book version mismatch',priceBookVersion:9})}},data:null};
+    return {error:{context:{json:async()=>({ok:false,code:'conflict',error:'Price book version mismatch'})}},data:null};
   }));
   let caught=null;
-  try{await api.quote('preview','job-1',{areas:[{sqft:450}]},{priceBookVersion:4});}catch(e){caught=e;}
+  try{await api.quote('preview','job-1',{areas:[{sqft:450}]});}catch(e){caught=e;}
   assert.strictEqual(body.mode,'preview');
   assert.strictEqual(body.job_id,'job-1');
-  assert.strictEqual(body.priceBookVersion,4);
+  assert.strictEqual(body.priceBookVersion,undefined);
+  assert.strictEqual(body.price_book_version,undefined);
   assert.strictEqual(body.job_data.areas[0].sqft,450);
-  assert.strictEqual(caught.code,'price_book_version_mismatch');
+  assert.strictEqual(caught.code,'stale_book');
+  const jobApi=Cloud.create(client(async()=>({error:{context:{json:async()=>({ok:false,code:'conflict',error:'Job or price book changed — retry'})}},data:null})));
+  let jobErr=null;
+  try{await jobApi.quote('record','job-1',null);}catch(e){jobErr=e;}
+  assert.strictEqual(jobErr.code,'conflict');
 });
 
 const JOB='00000000-0000-4000-8000-0000000000aa';
@@ -121,51 +134,67 @@ function deps(version){
 }
 const job={projectType:'floor',customer:'Smoke',areas:[{id:'a',name:'Floor',sqft:450,style:'flake'}]};
 
-checkAsync('quote-job returns a version mismatch and does not price the stale book',async()=>{
-  const box=deps(9);
-  const res=await Q.handleQuoteRequest({mode:'preview',job_data:job,priceBookVersion:4},box.deps,E);
+checkAsync('quote-job reports a price-book mismatch when the book changes during the quote',async()=>{
+  const stored={id:JOB,version:1,job_data:job};
+  let recorded=0;
+  const res=await Q.handleQuoteRequest({mode:'record',job_id:JOB},{
+    getProfile:async()=>({id:'emp-1',role:'employee',active:true}),
+    getJob:async()=>stored,
+    getPriceBook:async()=>({version:9,staff_settings:{},owner_settings:{}}),
+    getJobMarkup:async()=>null,
+    recordQuote:async()=>{throw new Error('Price book changed during quote calculation')},
+    discountStore:null
+  },E);
   assert.strictEqual(res.status,409);
-  assert.strictEqual(res.body.ok,false);
-  assert.strictEqual(res.body.code,'price_book_version_mismatch');
+  assert.strictEqual(res.body.code,'conflict');
   assert.strictEqual(res.body.error,'Price book version mismatch');
+  assert.strictEqual(recorded,0);
+  const jobChange=await Q.handleQuoteRequest({mode:'record',job_id:JOB},{
+    getProfile:async()=>({id:'emp-1',role:'employee',active:true}),
+    getJob:async()=>stored,
+    getPriceBook:async()=>({version:9,staff_settings:{},owner_settings:{}}),
+    getJobMarkup:async()=>null,
+    recordQuote:async()=>{throw new Error('Job changed since the quote was computed (server version 15)')},
+    discountStore:null
+  },E);
+  assert.strictEqual(jobChange.status,409);
+  assert.strictEqual(jobChange.body.code,'conflict');
+  assert.strictEqual(jobChange.body.error,'Job or price book changed — retry');
+});
+
+checkAsync('a preview still prices when the caller does not send a book version',async()=>{
+  const res=await Q.handleQuoteRequest({mode:'preview',job_data:job},deps(9).deps,E);
+  assert.strictEqual(res.status,200);
   assert.strictEqual(res.body.priceBookVersion,9);
-  assert.strictEqual(res.body.staff,undefined);
-  assert.strictEqual(box.recorded(),0);
+  assert.strictEqual(res.body.staff.total,4500);
 });
 
-checkAsync('a matching version and an omitted version still price',async()=>{
-  const matched=deps(9);
-  const ok=await Q.handleQuoteRequest({mode:'preview',job_data:job,priceBookVersion:9},matched.deps,E);
-  assert.strictEqual(ok.status,200);
-  assert.strictEqual(ok.body.staff.total,4500);
-  const omitted=deps(9);
-  const legacy=await Q.handleQuoteRequest({mode:'preview',job_data:job},omitted.deps,E);
-  assert.strictEqual(legacy.status,200);
-  assert.strictEqual(legacy.body.staff.total,4500);
-});
-
-checkAsync('the browser path reloads once and the second quote uses the new version',async()=>{
-  let version=4;
-  const calls=[];
+checkAsync('the browser reloads once after the mismatch and does not reload a job conflict',async()=>{
+  let books=0;
+  let reloads=0;
   const shown=[];
   async function quote(){
-    calls.push(version);
-    const res=await Q.handleQuoteRequest({mode:'preview',job_data:job,priceBookVersion:version},deps(9).deps,E);
-    if(res.body&&res.body.code==='price_book_version_mismatch')throw mismatch(res.body.error);
-    if(!res.body||res.body.ok!==true){
-      const err=new Error(res.body&&res.body.error||'failed');
-      err.code=res.body&&res.body.code;
+    books+=1;
+    if(books===1){
+      const err=new Error('Price book version mismatch');
+      err.code='stale_book';
       throw err;
     }
-    return res.body;
+    return {ok:true,staff:{total:4500}};
   }
-  async function reload(){version=9;}
-  try{
-    const res=await Cloud.quoteWithPriceBookReload(quote,reload);
-    assert.strictEqual(res.staff.total,4500);
-  }catch(e){shown.push(e.message);}
-  assert.deepStrictEqual(shown,[]);
-  assert.deepStrictEqual(calls,[4,9]);
+  const res=await Cloud.quoteWithPriceBookReload(quote,async()=>{reloads+=1;});
+  assert.strictEqual(res.staff.total,4500);
+  assert.strictEqual(reloads,1);
+  assert.strictEqual(books,2);
+  async function jobQuote(){
+    const err=new Error('Job or price book changed — retry');
+    err.code='conflict';
+    throw err;
+  }
+  try{await Cloud.quoteWithPriceBookReload(jobQuote,async()=>{reloads+=1;});}
+  catch(e){shown.push(e.code);}
+  assert.deepStrictEqual(shown,['conflict']);
+  assert.strictEqual(reloads,1);
 });
 
 (async()=>{
