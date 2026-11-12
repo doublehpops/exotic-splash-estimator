@@ -36,7 +36,7 @@ Live price-book dollars are not copied here. Product prices, cost rates, and mar
 | `catalog.garage.materialAdj.custom` | garage | selling | unconfigured | awaiting_corrected_source | — | USD per package |
 | `catalog.garage.topcoatAdj.protective` | garage | selling | configured_zero | preserved_do_not_overwrite | — | USD per package |
 | `catalog.garage.topcoatAdj.none` | garage | selling | configured_zero | preserved_do_not_overwrite | — | USD per package |
-| `catalog.garage.topcoatAdj.premium` | garage | selling | unconfigured | awaiting_corrected_source | — | USD per package |
+| `catalog.garage.topcoatAdj.premium` | garage | selling | unconfigured | awaiting_corrected_source | — | USD per sq ft |
 | `catalog.garage.conditionAdj.unknown` | garage | selling | unconfigured | awaiting_corrected_source | — | USD per package |
 | `catalog.garage.conditionAdj.good` | garage | selling | configured_zero | preserved_do_not_overwrite | — | USD per package |
 | `catalog.garage.conditionAdj.fair` | garage | selling | unconfigured | awaiting_sourced_estimate | — | USD per package |

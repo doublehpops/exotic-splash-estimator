@@ -10,6 +10,7 @@ class CloudError extends Error{constructor(code,message,cause){super(message);th
 function friendly(err){
   const m=String(err&&(err.message||err.error_description||err)||'');
   if(/exceeds the owner-approved adjustment limit/i.test(m))return new CloudError('discount_over_cap','Discount exceeds the owner-approved adjustment limit.',err);
+  if(/Only the owner can change job status/i.test(m))return new CloudError('forbidden','Only the owner can change job status.',err);
   if(/Only the owner/i.test(m))return new CloudError('forbidden','Only the owner can do that.',err);
   if(/disabled or not yet approved|row-level security|permission denied|Not allowed/i.test(m))return new CloudError('forbidden','Not allowed for this account (disabled, not approved, or not your job).',err);
   if(/changed since|version/i.test(m)&&/changed/i.test(m))return new CloudError('conflict','Changed by someone else — reload and retry.',err);

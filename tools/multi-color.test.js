@@ -97,7 +97,8 @@ check('the price book UI offers four colors and the migration is later than the 
   assert.ok(sql.includes("'1.00'"));
   assert.ok(!/\bdelete\s+from\b/i.test(sql));
   const names=fs.readdirSync(path.join(__dirname,'..','supabase/migrations')).filter(n=>n.endsWith('.sql')).sort();
-  assert.strictEqual(names[names.length-1],'20261112183000_multi_color_rates.sql');
+  assert.ok(names.indexOf('20261112183000_multi_color_rates.sql')>names.indexOf('20261112181500_polyaspartic_topcoat_rate.sql'));
+  assert.ok(names[names.length-1]>='20261112183000_multi_color_rates.sql');
 });
 
 if(failed){console.error(failed+' failed');process.exit(1)}

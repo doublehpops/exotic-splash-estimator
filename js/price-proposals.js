@@ -147,7 +147,10 @@ function inventory(settings){
   for(const [path,label,unit,area] of SELLING_RATES)pushMoney(rows,s,path,label,unit,area,'selling');
   for(const [path,label,unit] of GARAGE_MONEY)pushMoney(rows,s,path,label,unit,'garage','selling');
   for(const key of ADJ_KEYS.materialAdj)pushMoney(rows,s,'catalog.garage.materialAdj.'+key,'Garage material '+key,'USD per package','garage','selling');
-  for(const key of ADJ_KEYS.topcoatAdj)pushMoney(rows,s,'catalog.garage.topcoatAdj.'+key,'Garage topcoat '+key,'USD per package','garage','selling');
+  for(const key of ADJ_KEYS.topcoatAdj){
+    const unit=key==='premium'?'USD per sq ft':'USD per package';
+    pushMoney(rows,s,'catalog.garage.topcoatAdj.'+key,'Garage topcoat '+key,unit,'garage','selling');
+  }
   for(const key of ADJ_KEYS.conditionAdjGarage)pushMoney(rows,s,'catalog.garage.conditionAdj.'+key,'Garage condition '+key,'USD per package','garage','selling');
   for(const key of ADJ_KEYS.prepAdj)pushMoney(rows,s,'catalog.garage.prepAdj.'+key,'Garage prep '+key,'USD per package','garage','selling');
   const bands=((((s.catalog||{}).flatwork)||{}).sizeBands)||[];
@@ -267,7 +270,7 @@ function ownerPricingSchema(){
       {key:'grip',note:'Traction pack was not matched to a catalog row.',apply:false},
       {key:'base',note:'Pigment is a separate row. Do not treat one kit cost as the full colored system.',apply:false}
     ],
-    garage_adjustment_rule:'Garage base fee is the selected tier flake rate times that package typical size. Solid credits stay per package. A single flat sealer or custom delta is not applied to a package. Critical condition and package leveling stay unfinished until inspection. Package reference dollars and per-sq-ft caps are left as already configured.',
+    garage_adjustment_rule:'Garage base fee is the selected tier flake rate times that package typical size. Solid credits stay per package. The garage polyaspartic topcoat is USD per sq ft. Flatwork topcoat stays a flat amount per item. A single flat sealer or custom delta is not applied to a package. Critical condition and package leveling stay unfinished until inspection. Package reference dollars and per-sq-ft caps are left as already configured.',
     pending_selling_paths:PENDING_PRICE_PATHS.slice(),
     structural_nulls:STRUCTURAL_NULL_PATHS.slice(),
     sourced_rows_loaded:SOURCED_ESTIMATES.length
