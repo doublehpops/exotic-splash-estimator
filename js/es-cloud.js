@@ -112,6 +112,11 @@ function create(client,opts){
       return unwrap(await client.rpc('owner_delete_jobs',{p_job_ids:list}));
     },
     async staffDirectory(){return unwrap(await client.rpc('staff_directory'))||[]},
+    /* Names only. Used when staff_directory is missing. RLS still decides who can read profiles. */
+    async listProfileNames(){
+      const rows=unwrap(await client.from('profiles').select('id,full_name'))||[];
+      return rows.filter(p=>p&&p.id).map(p=>({id:p.id,displayName:String(p.full_name||'').trim()||'Staff'}));
+    },
     async insertJob(clientRef,jobData){return unwrap(await client.from('jobs').insert({client_ref:clientRef,job_data:jobData}).select(JOB_COLS).single())},
     async updateJob(id,expectedVersion,jobData){
       const rows=unwrap(await client.from('jobs').update({job_data:jobData}).eq('id',id).eq('version',expectedVersion).select(JOB_COLS));
