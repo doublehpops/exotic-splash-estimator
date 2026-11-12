@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex,nofollow">
+<title>How did we do? | Exotic Splash Epoxy</title>
+<style>
+body{margin:0;background:#f5f5f0;color:#192e2b;font-family:Arial,Helvetica,sans-serif}
+.wrap{max-width:640px;margin:0 auto;padding:18px}
+.card{background:#fff;border:1px solid #e0e5df;border-radius:14px;padding:22px}
+.brand{font-weight:800;color:#163d37;font-size:18px}
+h1{font-size:26px;margin:12px 0 8px}
+p{color:#667671;line-height:1.5}
+fieldset{border:1px solid #e0e5df;border-radius:10px;margin:12px 0;padding:12px}
+legend{font-weight:700;padding:0 6px}
+label{display:block;margin:8px 0;font-size:15px}
+textarea,input[type=text]{width:100%;box-sizing:border-box;font:inherit;padding:10px;border:1px solid #d9e1de;border-radius:8px}
+.scale label{display:inline-flex;gap:6px;margin-right:10px}
+button{font:inherit;font-weight:700;padding:12px 18px;border:0;border-radius:10px;background:#163d37;color:#fff;cursor:pointer}
+button[disabled]{opacity:.6;cursor:default}
+#surveyMsg{min-height:1.2em}
+.note{font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card" id="survey" aria-live="polite">
+    <div class="brand">Exotic Splash Epoxy</div>
+    <h1>How did we do?</h1>
+    <p class="note">A few questions about the visit. This page does not show a price.</p>
+    <p id="surveyState">Loading…</p>
+  </div>
+</div>
+<script src="public-config.js"></script>
+<script src="vendor/supabase-js-2.119.0.umd.js" integrity="sha384-uteMfOloLDGt042uDz+xHGF3ym63/WQ6rFq7murQRG8Ih7QrXGEGNtWd8688sb4O"></script>
+<script src="js/es-config.js"></script>
+<script src="js/es-cloud.js"></script>
+<script src="js/followup-core.js"></script>
+<script src="js/followup-ui.js"></script>
+<script>
+(function(){
+  'use strict';
+  const host=document.getElementById('survey');
+  const stateEl=document.getElementById('surveyState');
+  const F=window.EsFollowup;
+  const UI=window.EsFollowupUI;
+  const params=new URLSearchParams(location.search);
+  const preview=params.get('preview')==='1';
+  function say(text){stateEl.textContent=text;host.dataset.surveyState=text? 'note':'form'}
+  function readAnswers(form){
+    const answers={};
+    for(const q of F.SURVEY_QUESTIONS){
+      if(q.type==='text'){
+        const el=form.elements[q.id];
+        answers[q.id]=el?el.value:'';
+      }else{
+        const picked=form.querySelector('input[name="'+q.id+'"]:checked');
+        answers[q.id]=picked?picked.value:'';
+      }
+    }
+    return answers;
+  }
+  function paint(questions){
+    stateEl.hidden=true;
+    const holder=document.createElement('div');
+    holder.innerHTML=UI.surveyForm(questions);
+    host.appendChild(holder);
+    host.dataset.surveyState='form';
+    return holder.querySelector('#surveyForm');
+  }
+  function thankYou(){
+    host.innerHTML='<div class="brand">Exotic Splash Epoxy</div><h1>Thank you.</h1><p>Your answers were saved. This link will not open the survey again.</p>';
+    host.dataset.surveyState='done';
+  }
+  if(preview){
+    const form=paint(F.SURVEY_QUESTIONS);
+    form.addEventListener('submit',function(ev){
+      ev.preventDefault();
+      const check=F.validateSurveyAnswers(readAnswers(form));
+      const msg=form.querySelector('#surveyMsg');
+      if(!check.ok){msg.textContent=check.error||'Please answer each question.';return}
+      host.innerHTML='<div class="brand">Exotic Splash Epoxy</div><h1>Preview only.</h1><p>These answers were not saved. Open the link from your text to send them.</p>';
+      host.dataset.surveyState='preview-done';
+    });
+    return;
+  }
+  const cfg=EsConfig.validate(window.ES_PUBLIC_CONFIG);
+  if(cfg.state!=='ok'){say('This survey is not configured yet. Please contact Exotic Splash.');host.dataset.surveyState='unconfigured';return}
+  const token=F.tokenFromHash(location.hash);
+  if(!F.TOKEN_RE.test(token)){say('This survey link is not valid.');host.dataset.surveyState='invalid';return}
+  const client=supabase.createClient(cfg.url,cfg.key,{auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false}});
+  const cloud=EsCloud.create(client);
+  cloud.getFollowupSurvey(token).then(function(data){
+    if(!data||data.ok!==true){
+      say(data&&data.code==='used'?'These answers were already sent. Thank you.':'This survey link is not valid.');
+      host.dataset.surveyState=data&&data.code==='used'?'used':'invalid';
+      return;
+    }
+    const form=paint(data.questions||F.SURVEY_QUESTIONS);
+    form.addEventListener('submit',function(ev){
+      ev.preventDefault();
+      const answers=readAnswers(form);
+      const check=F.validateSurveyAnswers(answers);
+      const msg=form.querySelector('#surveyMsg');
+      const btn=form.querySelector('#surveySubmit');
+      if(!check.ok){msg.textContent=check.error||'Please answer each question.';return}
+      btn.disabled=true;
+      cloud.submitFollowupSurvey(token,check.answers).then(function(res){
+        if(res&&res.ok)thankYou();
+        else{btn.disabled=false;msg.textContent=(res&&res.code==='used')?'These answers were already sent.':((res&&res.error)||'Could not save. Please try again.');}
+      }).catch(function(){btn.disabled=false;msg.textContent='Could not save. Please try again.';});
+    });
+  }).catch(function(){say('Could not open the survey right now. Please try again later.');host.dataset.surveyState='error'});
+})();
+</script>
+</body>
+</html>
