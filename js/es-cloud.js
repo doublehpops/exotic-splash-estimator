@@ -157,6 +157,11 @@ function create(client,opts){
     async acceptSharedEstimate(token,name,note){return unwrap(await client.rpc('accept_shared_estimate',{p_token:token,p_name:name,p_note:note||''}))},
     async getEstimateAcceptance(token){return unwrap(await client.rpc('get_estimate_acceptance',{p_token:token}))},
     async listAcceptances(){return unwrap(await client.rpc('staff_list_estimate_acceptances'))||[]},
+    async listFollowups(){return unwrap(await client.rpc('list_followups'))||{rows:[]}},
+    async followupAction(id,action,when){return unwrap(await client.rpc('followup_owner_action',{p_id:id,p_action:action,p_when:when||null}))},
+    async setFollowupSettings(enabled,dryRun,voiceEnabled){return unwrap(await client.rpc('owner_set_followup_settings',{p_enabled:!!enabled,p_dry_run:dryRun!==false,p_voice_enabled:!!voiceEnabled}))},
+    async getFollowupSurvey(token){return unwrap(await client.rpc('get_followup_survey',{p_token:token}))},
+    async submitFollowupSurvey(token,answers){return unwrap(await client.rpc('submit_followup_survey',{p_token:token,p_answers:answers}))},
     /* ---------- job photos: private Storage bucket, path <job uuid>/<photo id>.jpg ---------- */
     photoPath(jobId,photoId){return String(jobId)+'/'+String(photoId||'').replace(/[^A-Za-z0-9_-]/g,'')+'.jpg'},
     async uploadPhoto(jobId,photoId,blob){

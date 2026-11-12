@@ -60,7 +60,40 @@ byte-identical to the ones under `js`.
 `public-config.js` holds only the project URL and the publishable (anon) key. Never put the
 service_role or an `sb_secret_` key there; `js/es-config.js` refuses to start if it sees one.
 
-## 6. Rebuilding from nothing
+## 6. Follow-up texts (not applied with this file)
+
+The follow-up migrations and the `followup-dispatch` / `followup-inbound` functions
+are in the repo only. Do not apply the migrations or deploy the functions until
+the draft is reviewed. They ship with follow-ups disabled and dry run on, so a
+deploy still does not text anyone until the owner turns the switches on.
+
+After review, the owner sets these as function secrets (never in `public-config.js`
+or the git repo):
+
+| Secret | Required |
+| --- | --- |
+| `RETELL_API_KEY` | Yes, for Retell texts and for verifying Retell webhooks |
+| `RETELL_FOLLOWUP_AGENT_ID` | Yes for Retell. Use the Ashley Text - Exotic Splash agent id |
+| `RETELL_FROM_NUMBER` | Optional. Defaults to `+13125842873` |
+| `RETELL_VOICE_AGENT_ID` | Only if voice is turned on later. Voice is not scheduled |
+| `FOLLOWUP_SMS_PROVIDER` | `retell` or `twilio`. Empty means the send is marked not configured |
+| `TWILIO_ACCOUNT_SID` | Only for the Twilio provider |
+| `TWILIO_AUTH_TOKEN` | Only for the Twilio provider, also verifies inbound Twilio signatures |
+| `TWILIO_FROM_NUMBER` | Optional. Defaults to `+13125842873` |
+| `FOLLOWUP_SURVEY_BASE_URL` | Optional. Defaults to the GitHub Pages `survey.html` |
+
+The 15-minute cron reads two Vault secrets, which are also not in the repo:
+`project_url` (the project API URL) and `followup_dispatch_bearer` (the service
+role key). Until those exist, the cron logs a skip and does not call the function.
+
+The sending number needs A2P 10DLC registration before real texts. The Ashley Text
+prompt to paste into Retell is in `docs/followup-ashley-text-prompt.md`.
+
+Deploy the inbound function with JWT verification off (`--no-verify-jwt`). Retell
+and Twilio do not send a Supabase JWT. The function rejects requests that fail
+their own signature checks.
+
+## 7. Rebuilding from nothing
 
 1. Create a new project and run `supabase link`. Run `supabase/baseline/schema.sql` on the
    empty database, then mark the migrations as applied as described in

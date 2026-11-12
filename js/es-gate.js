@@ -123,8 +123,8 @@ async function enterApp(){
     const jobs=rows.map(r=>rowToJob(r,owner?markups[r.id]:undefined,settings));
     applyOutbox(profile.id,jobs);
     rt={mode:'auth',profile,settings,jobs,priceBook:{version:pb?pb.version:null,updatedAt:pb?pb.updated_at:null,ownerEmpty:owner?isEmptyBook(pb):null,sig:owner?bookSig(settings):null},
-      syncStatus:'connected',onSave,requestPreview,discountCall,onClick,priceBookPanelHTML,sharePanelHTML,staffViewHTML,jobsExtraHTML,approvalsViewHTML,photoSrc,photoRemoved,
-      shares:{},newShare:null,staffList:null,audit:null,localScan:null,approvals:null,approvalFilter:'pending',approvalsPending:0,acceptances:null,estimatorDirectory};
+      syncStatus:'connected',onSave,requestPreview,discountCall,onClick,priceBookPanelHTML,sharePanelHTML,staffViewHTML,jobsExtraHTML,approvalsViewHTML,followupsViewHTML,photoSrc,photoRemoved,
+      shares:{},newShare:null,staffList:null,audit:null,localScan:null,approvals:null,approvalFilter:'pending',approvalsPending:0,acceptances:null,followups:null,followupSettings:{enabled:false,dryRun:true,voiceEnabled:false},estimatorDirectory};
     rt.deleteJobs=deleteJobs;
     rt.setJobStatus=setJobStatus;
     $('gate').hidden=true;$('appRoot').hidden=false;
@@ -172,6 +172,7 @@ function decorateShell(){
   $('restoreLabel').hidden=true;
   $('signOutTop').hidden=false;
   if(!D.querySelector('#nav [data-view="approvals"]')){const b=D.createElement('button');b.dataset.view='approvals';b.innerHTML='✓ <span>Approvals</span><span class="nav-badge" id="esApprovalBadge" hidden></span>';$('nav').appendChild(b)}
+  if(!D.querySelector('#nav [data-view="followups"]')){const b=D.createElement('button');b.dataset.view='followups';b.innerHTML='✉ <span>Follow-ups</span>';$('nav').appendChild(b)}
   if(owner&&!D.querySelector('#nav [data-view="staff"]')){const b=D.createElement('button');b.dataset.view='staff';b.innerHTML='👥 <span>Staff access</span>';$('nav').appendChild(b)}
   $('footMode').textContent='v7 · signed in · server-verified pricing';
 }
@@ -412,6 +413,57 @@ function approvalsViewHTML(){
   ${list?`<div class="table-wrap"><table><thead><tr><th>Job</th><th>${owner?'Requested by':'Requested'}</th><th>Tier</th><th class="num">Before → after</th><th>Reason</th><th>Status</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="7">Nothing here.</td></tr>'}</tbody></table></div>`:'<p class="method-note">Loading…</p>'}
   </section>`;
 }
+function followupsViewHTML(){
+  const UI=W.EsFollowupUI;
+  if(!rt)return '';
+  if(!UI)return '<p class="method-note">Follow-ups are unavailable.</p>';
+  return UI.renderPanel({
+    owner:rt.profile.role==='owner',
+    rows:rt.followups,
+    settings:rt.followupSettings||{enabled:false,dryRun:true,voiceEnabled:false}
+  });
+}
+async function loadFollowups(){
+  if(!rt)return;
+  if(String(rt.profile&&rt.profile.id||'').indexOf('preview-')===0){if(G().state.view==='followups')G().render();return}
+  if(!cloud||!cloud.listFollowups)return;
+  try{
+    const data=await cloud.listFollowups();
+    rt.followups=(data&&data.rows)||[];
+    if(data&&data.settings)rt.followupSettings=data.settings;
+  }catch(e){rt.followups=[];toast(e.message)}
+  if(G().state.view==='followups')G().render();
+}
+async function saveFollowupSettings(){
+  if(!rt||rt.profile.role!=='owner'){toast('Only the owner can change follow-up switches.');return}
+  const enabled=!!($('fuEnabled')&&$('fuEnabled').checked);
+  const dryRun=!($('fuDryRun')&&$('fuDryRun').checked===false);
+  const voice=!!($('fuVoice')&&$('fuVoice').checked);
+  try{
+    rt.followupSettings=await cloud.setFollowupSettings(enabled,dryRun,voice);
+    toast(enabled?'Follow-ups enabled. Dry run still blocks a real text until you turn it off.':'Follow-ups stay off.');
+    G().render();
+  }catch(e){toast(e.message)}
+}
+async function followupAction(action,id){
+  if(!rt||rt.profile.role!=='owner'){toast('Only the owner can change a follow-up.');return}
+  let when=null;
+  if(action==='reschedule'){
+    const input=$('fu-when-'+id);
+    const raw=input&&input.value;
+    if(!raw){toast('Choose a Chicago time first.');return}
+    const match=/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(raw);
+    if(!match||!W.EsFollowup){toast('Choose a valid time.');return}
+    when=W.EsFollowup.zonedTimeToUtc(Number(match[1]),Number(match[2]),Number(match[3]),Number(match[4]),Number(match[5])).toISOString();
+  }
+  if(action==='text_now'&&!W.confirm('Text this customer now if it is between 9 AM and 8 PM Chicago? Outside that window it waits until 9 AM. Dry run still will not send.'))return;
+  if(action==='skip'&&!W.confirm('Skip this follow-up? It will not be texted.'))return;
+  try{
+    await cloud.followupAction(id,action,when);
+    toast(action==='text_now'?'Queued. A real text goes out only when follow-ups are enabled and dry run is off.':action==='skip'?'Skipped.':'Rescheduled.');
+    await loadFollowups();
+  }catch(e){toast(e.message)}
+}
 async function loadApprovals(){
   if(!rt)return;
   try{rt.approvals=rt.profile.role==='owner'?await cloud.listDiscountRequests(rt.approvalFilter||''):await cloud.listMyDiscountRequests()}
@@ -558,6 +610,10 @@ function onClick(t){
   if(!rt)return false;
   if(t.dataset.view==='staff'){G().go('staff');loadStaff();return true}
   if(t.dataset.view==='approvals'){G().go('approvals');loadApprovals();refreshApprovalBadge();return true}
+  if(t.dataset.view==='followups'){G().go('followups');loadFollowups();return true}
+  if(t.dataset.followupAction){followupAction(t.dataset.followupAction,t.dataset.followupId);return true}
+  if(t.id==='fuSaveSettings'){saveFollowupSettings();return true}
+  if(t.id==='fuReload'){loadFollowups();return true}
   if(t.dataset.approveId){decideFromInbox(t.dataset.approveId,t.dataset.estimateId,'approve');return true}
   if(t.dataset.rejectId){decideFromInbox(t.dataset.rejectId,t.dataset.estimateId,'reject');return true}
   if(t.dataset.revokeShare){revoke(t.dataset.revokeShare);return true}
@@ -663,7 +719,14 @@ function startPreview(kind){
     estimatorDirectory:{'preview-owner':'Preview Owner','preview-staff':'Sam Ellis'},
     onSave(){D.querySelectorAll('.save-pill').forEach(el=>{el.textContent='Saving…';el.dataset.state='saving'});clearTimeout(startPreview._t);startPreview._t=setTimeout(()=>D.querySelectorAll('.save-pill').forEach(el=>{el.textContent='Saved';el.dataset.state='saved'}),450)},
     requestPreview(){},discountCall:async()=>({ok:false,error:'Preview only'}),
-    onClick(t){if(t.dataset.view==='staff'){G().go('staff');return true}if(t.dataset.view==='approvals'){G().go('approvals');return true}return false},
+    onClick(t){
+      if(t.dataset.view==='staff'){G().go('staff');return true}
+      if(t.dataset.view==='approvals'){G().go('approvals');return true}
+      if(t.dataset.view==='followups'){G().go('followups');return true}
+      if(t.dataset.followupAction||t.id==='fuSaveSettings'){toast('Preview only. Nothing was texted.');return true}
+      if(t.id==='fuReload'){G().render();return true}
+      return false
+    },
     priceBookPanelHTML(){return ''},sharePanelHTML(){return ''},photoSrc(){return ''},photoRemoved(){},
     approvals:[
       {id:'10000000-0000-4000-8000-0000000000a1',estimateId:'20000000-0000-4000-8000-0000000000b1',jobNumber:'ES-20261111-04',customer:'Rivera Auto Care',requesterName:'Sam Ellis',requesterEmail:'sam@example.com',requestedAt:'2026-11-11T15:04:00Z',tier:'opt1',beforeTotal:2100,amount:300,percent:null,afterTotal:1800,reason:'Repeat garage customer',status:'pending'},
@@ -673,7 +736,13 @@ function startPreview(kind){
       {id:'preview-owner',email:'owner@example.com',full_name:'Preview Owner',role:'owner',active:true},
       {id:'preview-staff',email:'sam@example.com',full_name:'Sam Ellis',role:'employee',active:true}
     ],shares:{},newShare:null,audit:null,localScan:null};
-  rt.staffViewHTML=staffViewHTML;rt.approvalsViewHTML=approvalsViewHTML;rt.jobsExtraHTML=jobsExtraHTML;
+  rt.staffViewHTML=staffViewHTML;rt.approvalsViewHTML=approvalsViewHTML;rt.followupsViewHTML=followupsViewHTML;rt.jobsExtraHTML=jobsExtraHTML;
+  rt.followups=employee?[
+    {id:'fu-emp',jobNumber:'ES-20261103-03',customerFirstName:'Oak',status:'scheduled',scheduledFor:'2026-11-13T16:00:00.000Z',sentAt:null,surveyAnswers:{experience:5},outcomeReason:'too expensive',inboundReplies:[{body:'STOP'}]}
+  ]:[
+    {id:'fu-owner',jobNumber:'ES-20261101-01',customerFirstName:'Alex',status:'scheduled',channel:'sms',jobOutcome:'undecided',scheduledFor:'2026-11-13T16:00:00.000Z',sentAt:null,surveyAnswers:{experience:4,why_not:''},outcomeReason:'',inboundReplies:[],projectSummary:'flake floor'}
+  ];
+  rt.followupSettings={enabled:false,dryRun:true,voiceEnabled:false};
   rt.deleteJobs=deleteJobs;rt.setJobStatus=setJobStatus;
   $('gate').hidden=true;$('appRoot').hidden=false;
   D.body.classList.add('mode-auth');D.body.classList.remove('mode-demo');

@@ -169,6 +169,8 @@ function guidedJob(base){
   j.includeCustomerContactInSub=!!j.includeCustomerContactInSub;
   j.includeCustomerPriceInSub=!!j.includeCustomerPriceInSub;
   j.includeGuideWithEstimate=j.includeGuideWithEstimate!==false; // default ON for customer package
+  j.followupConsent=raw.followupConsent===true;
+  j.quoteDecision=['booked','declined','undecided'].includes(raw.quoteDecision)?raw.quoteDecision:'';
   j.isSample=!!j.isSample;
   j.sampleLabel=j.sampleLabel||'';
   j.crew=E.crewSize(j);
@@ -882,6 +884,9 @@ function stepContact(j){
   ${j.isSample?`<div class="sample-banner"><b>ILLUSTRATIVE SAMPLE DATA</b> — fictional/demo content for training. Not a live customer record.</div>`:''}
   <div class="fields">${field('Customer name','job.customer','text','Who the quote is for')}${field('Phone','job.phone','tel','A phone, email, or the job address is enough, with the name')}${field('Email','job.email','email')}
   <div class="field full"><label for="f-job.address">Job address</label><input id="f-job.address" data-path="job.address" type="text" value="${escape(j.address)}" placeholder="Street, city, state" autocomplete="street-address"></div></div>
+  ${checkbox('Customer agreed to a follow-up call/text','job.followupConsent')}
+  <p class="method-note">Leave this off unless the customer agreed. The lead form does not record that agreement, so it starts unchecked. Nothing is texted without it.</p>
+  ${select('Quote result','job.quoteDecision',[['','Not marked yet'],['booked','Booked'],['declined','Declined'],['undecided','Undecided']])}
   ${contactSufficient(j)?`<div class="info-banner">This job is saved${authMode()?' to your account':''} for <b>${escape(j.customer||j.company||'this lead')}</b>.</div>`
     :`<div class="empty-state"><h3>Start with the customer</h3><p>Enter a name and at least one of phone, email, or job address. A server job is not created until then.</p></div>`}
   <div class="palette-block"><span class="eyebrow">PROJECT TYPE</span>
@@ -2198,11 +2203,11 @@ function openMapsDirections(){
 
 function render(){
   ensureJob();
-  const v=['guided','rates','customer','guide','subcontractor','internal','jobs'].concat(authMode()?['approvals']:[]).concat(authMode()&&isOwner()?['staff']:[]).includes(state.view)?state.view:'guided';
+  const v=['guided','rates','customer','guide','subcontractor','internal','jobs'].concat(authMode()?['approvals','followups']:[]).concat(authMode()&&isOwner()?['staff']:[]).includes(state.view)?state.view:'guided';
   state.view=v;
   document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active',b.dataset.view===v));
-  $('breadcrumb').textContent='Guided / '+({guided:'Field workflow',rates:'Costs & pricing',customer:'Customer document',guide:'Install guide',subcontractor:'Subcontractor',internal:'Internal job-cost',jobs:'Job list',staff:'Staff access',approvals:'Discount approvals'}[v]);
-  const map={guided:guidedView,rates:ratesView,customer:customerView,guide:guideView,subcontractor:subView,internal:internalView,jobs:jobsView,staff:()=>runtime.staffViewHTML?runtime.staffViewHTML():'',approvals:()=>runtime.approvalsViewHTML?runtime.approvalsViewHTML():''};
+  $('breadcrumb').textContent='Guided / '+({guided:'Field workflow',rates:'Costs & pricing',customer:'Customer document',guide:'Install guide',subcontractor:'Subcontractor',internal:'Internal job-cost',jobs:'Job list',staff:'Staff access',approvals:'Discount approvals',followups:'Follow-ups'}[v]);
+  const map={guided:guidedView,rates:ratesView,customer:customerView,guide:guideView,subcontractor:subView,internal:internalView,jobs:jobsView,staff:()=>runtime.staffViewHTML?runtime.staffViewHTML():'',approvals:()=>runtime.approvalsViewHTML?runtime.approvalsViewHTML():'',followups:()=>runtime.followupsViewHTML?runtime.followupsViewHTML():''};
   const openFlags=window.EsMobileUX&&window.EsMobileUX.captureOpen?window.EsMobileUX.captureOpen():null;
   $('main').innerHTML=map[v]();
   updateLive();
