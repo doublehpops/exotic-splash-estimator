@@ -107,20 +107,42 @@ function zipOf(job){
   return m?m[1]:'';
 }
 
-function systemsOf(job){
-  const out=new Set();
+function extraSections(job){
+  return (Array.isArray(job&&job.sections)?job.sections:[]).filter(s=>s&&typeof s==='object');
+}
+function addSystems(out,job){
   const type=String(job&&job.projectType||'floor');
   // Floor and catalog jobs quote from area / item style. guidedJob also stores a
   // default garageStyle of flake on those jobs; that default is not their system.
   if(type==='garage'){
     if(job.garageStyle)out.add(String(job.garageStyle));
-    return out;
+    return;
   }
   for(const a of (job&&job.areas)||[]){
     if(a&&a.style)out.add(String(a.style));
   }
   for(const it of (job&&job.catalogItems)||[]){
     if(it&&it.style)out.add(String(it.style));
+  }
+}
+function systemsOf(job){
+  const out=new Set();
+  addSystems(out,job);
+  for(const s of extraSections(job))addSystems(out,s);
+  return out;
+}
+function projectTypesOf(job){
+  const out=[];
+  const push=t=>{const id=String(t||'floor');if(out.indexOf(id)<0)out.push(id)};
+  push(job&&job.projectType);
+  for(const s of extraSections(job))push(s.projectType);
+  return out;
+}
+function sectionAddresses(job){
+  const out=[String(job&&job.address||'')];
+  for(const s of extraSections(job)){
+    const own=String(s.address||'').trim();
+    if(own)out.push(own);
   }
   return out;
 }
@@ -149,10 +171,31 @@ function dayOf(value){
   return s.slice(0,10);
 }
 
+function citiesOf(job){
+  const out=[];
+  const add=(value)=>{const city=String(value||'').trim();if(city&&out.indexOf(city)<0)out.push(city)};
+  add(cityOf(job));
+  for(const s of extraSections(job)){
+    const own=String(s.address||'').trim();
+    if(!own)continue;
+    add(s.city||cityOf({address:own}));
+  }
+  return out;
+}
+function zipsOf(job){
+  const out=[];
+  const add=z=>{if(z&&out.indexOf(z)<0)out.push(z)};
+  add(zipOf(job));
+  for(const s of extraSections(job)){
+    const own=String(s.address||'').trim();
+    if(own)add(zipOf({address:own,zip:s.zip}));
+  }
+  return out;
+}
 function matchesQuery(job,q){
   const query=String(q||'').trim().toLowerCase();
   if(!query)return true;
-  const blob=[job.customer,job.company,job.address,cityOf(job),zipOf(job),job.number].join(' ').toLowerCase();
+  const blob=[job.customer,job.company,sectionAddresses(job).join(' '),citiesOf(job).join(' '),zipsOf(job).join(' '),job.number].join(' ').toLowerCase();
   if(blob.includes(query))return true;
   const digits=query.replace(/\D/g,'');
   const phone=phoneDigits(job.phone);
@@ -175,15 +218,17 @@ function matches(job,filters){
   const status=statusOf(job);
   if(status==='archived'&&f.showArchived!==true&&f.status!=='archived')return false;
   if(f.status&&status!==f.status)return false;
-  if(f.type&&String(job.projectType||'floor')!==f.type)return false;
+  if(f.type&&projectTypesOf(job).indexOf(f.type)<0)return false;
   if(f.system&&!systemsOf(job).has(f.system))return false;
   if(f.tier&&String(job.priceOption||'regular')!==f.tier)return false;
   if(f.garageSize){
-    if(String(job.projectType||'floor')!=='garage')return false;
-    if(String(job.garagePackage||'')!==f.garageSize)return false;
+    const sizes=[];
+    if(String(job.projectType||'')==='garage')sizes.push(String(job.garagePackage||''));
+    for(const s of extraSections(job))if(String(s.projectType||'')==='garage')sizes.push(String(s.garagePackage||''));
+    if(sizes.indexOf(f.garageSize)<0)return false;
   }
-  if(f.city&&cityOf(job).toLowerCase()!==String(f.city).toLowerCase())return false;
-  if(f.zip&&zipOf(job)!==String(f.zip).replace(/\D/g,'').slice(0,5))return false;
+  if(f.city&&!citiesOf(job).some(c=>c.toLowerCase()===String(f.city).toLowerCase()))return false;
+  if(f.zip&&zipsOf(job).indexOf(String(f.zip).replace(/\D/g,'').slice(0,5))<0)return false;
   if(f.crew==='__unassigned__'){if(String(job.assignedCrew||'').trim())return false}
   else if(f.crew&&String(job.assignedCrew||'')!==f.crew)return false;
   if(f.estimator&&String(job.estimatorName||'')!==f.estimator)return false;
@@ -236,16 +281,24 @@ function groupKey(job,group){
   if(group==='city')return cityOf(job)||'No city';
   return '';
 }
+function groupLabels(job,group){
+  if(group!=='type')return [groupKey(job,group)];
+  return projectTypesOf(job).map(t=>LABELS.type[t]||LABELS.type[t||'floor']||String(t||'floor'));
+}
 
 function groupJobs(jobs,group){
   if(!group||group==='none')return [{key:'',label:'',jobs:jobs}];
   const buckets=new Map();
   for(const job of jobs){
-    const label=groupKey(job,group);
-    if(!buckets.has(label))buckets.set(label,[]);
-    buckets.get(label).push(job);
+    for(const label of groupLabels(job,group)){
+      if(!buckets.has(label))buckets.set(label,[]);
+      buckets.get(label).push(job);
+    }
   }
   return Array.from(buckets,([label,rows])=>({key:label,label:label,jobs:rows}));
+}
+function typeSummary(job){
+  return groupLabels(job,'type').join(' + ');
 }
 
 function apply(jobs,filters){
@@ -283,7 +336,7 @@ function phraseMatches(typed,expected){
 return {
   FILTER_KEY,STATUSES,DATE_FIELDS,SORTS,GROUPS,LABELS,
   defaultFilters,loadFilters,saveFilters,
-  statusOf,cityOf,zipOf,systemsOf,priceOf,
+  statusOf,cityOf,zipOf,systemsOf,priceOf,projectTypesOf,sectionAddresses,typeSummary,citiesOf,zipsOf,
   matches,apply,distinct,
   expectedDeletePhrase,phraseMatches
 };

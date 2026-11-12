@@ -29,6 +29,7 @@ function render(payload,acceptance){
   const docName=d.type==='invoice'?'Invoice':'Estimate';
   const rows=e.project&&e.project.catalog?lineRows(e.catalogStarting)+lineRows(e.catalogAdjustments):lineRows(e.lines);
   const scope=(e.scope||[]).map(a=>`<li><b>${esc(a.name)}</b> — ${num(a.sqft)} sq ft · ${esc(a.description)}${a.color?' · color: '+esc(a.color):''}${a.flakeBlend?' · flake: '+esc(a.flakeBlend):''}${a.moisture?' · moisture-control primer':''}</li>`).join('');
+  const projects=(e.sections||[]).length>1?(e.sections||[]).map(s=>`<li><b>${esc(s.label||'Project')}</b> — ${esc(s.address||'')} — ${s.quoteReady===false?'Pending':cash(s.subtotal)}</li>`).join(''):'';
   const pays=(sel.payments||[]).map(p=>`<tr><td>${esc(p.label)} (${num(p.pct)}%)</td><td class="num">${cash(p.amount)}</td></tr>`).join('');
   const opts=e.showOptions?(e.options||[]).map(o=>`<div class="opt ${o.key===sel.key?'sel':''}"><b>${esc(o.label)}</b><span>${cash(o.total)}</span>${o.savings?`<small>Save ${cash(o.savings)}</small>`:''}</div>`).join(''):'';
   return `<section class="est-card">
@@ -36,6 +37,7 @@ function render(payload,acceptance){
   <div class="est-title"><h1>${docName}</h1><p>${esc(d.number)}${d.date?' · '+esc(d.date):''}</p></div></header>
   <p class="est-cust"><b>Prepared for:</b> ${esc(c.name)}${c.company?' · '+esc(c.company):''}<br/>${esc(c.address)}</p>
   ${ready?'':`<div class="est-pending" role="alert"><b>Pricing pending.</b> This ${docName.toLowerCase()} is not finalized. ${(e.pendingReasons||[]).map(esc).join(' · ')}</div>`}
+  ${projects?`<h2>Projects</h2><ul class="est-scope">${projects}</ul>`:''}
   ${scope?`<h2>Scope</h2><ul class="est-scope">${scope}</ul>`:''}
   ${(e.prepNotes||[]).length?`<h2>Surface preparation</h2><ul>${e.prepNotes.map(p=>'<li>'+esc(p)+'</li>').join('')}</ul>`:''}
   <h2>Pricing</h2>

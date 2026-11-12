@@ -23,11 +23,21 @@ function revisionOf(job,beforeTotal){
     id:it.id||'',qty:n(it.qty),seatType:it.seatType||'',sizeBand:it.sizeBand||'',
     style:it.style||'',condition:it.condition||'',customStarting:it.customStarting==null?'':it.customStarting
   }));
-  return hash(JSON.stringify({
+  const payload={
     areas,items,condition:job.condition||'',patchKits:n(job.patchKits),tax:n(job.tax),
     addOn:!!job.addOnIncluded,addOnTier:job.addOnTier||'',miles:n(job.miles),minutes:n(job.minutes),
     tier:job.priceOption||'regular',method:job.method||'rates',beforeCents:Math.round(n(beforeTotal)*100)
-  }));
+  };
+  /* Extra projects are part of the approved total. A single-project job keeps the previous revision text. */
+  if(Array.isArray(job.sections)&&job.sections.length){
+    payload.sections=job.sections.map(s=>({
+      type:(s&&s.projectType)||'',address:(s&&s.address)||'',
+      package:(s&&s.garagePackage)||'',style:(s&&s.garageStyle)||'',condition:(s&&s.garageCondition)||'',
+      areas:((s&&s.areas)||[]).map(a=>({id:a.id||'',sqft:n(a.sqft),style:a.style||''})),
+      items:((s&&s.catalogItems)||[]).map(it=>({id:it.id||'',qty:n(it.qty),customStarting:it.customStarting==null?'':it.customStarting}))
+    }));
+  }
+  return hash(JSON.stringify(payload));
 }
 function fail(status,code,error){return {ok:false,status,code,error}}
 function publicView(row){
