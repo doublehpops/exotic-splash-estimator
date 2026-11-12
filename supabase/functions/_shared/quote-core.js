@@ -13,7 +13,7 @@
 'use strict';
 const CORE_VERSION='7.0.0';
 const clone=x=>JSON.parse(JSON.stringify(x));
-const STAFF_SECTIONS=['business','rates','pricingOptions','addOn','approvedAdjustment','catalog','notes'];
+const STAFF_SECTIONS=['business','rates','pricingOptions','addOn','approvedAdjustment','catalog','notes','garage','extras'];
 const OWNER_SECTIONS=['products','costs'];
 function discountApi(){return (typeof globalThis!=='undefined'&&globalThis.EsDiscountApproval)||(typeof require==='function'?function(){try{return require('./discount-approval.js')}catch(e){return null}}():null)}
 function sanityApi(){return (typeof globalThis!=='undefined'&&globalThis.EsPriceSanity)||(typeof require==='function'?function(){try{return require('./price-sanity.js')}catch(e){return null}}():null)}
@@ -65,7 +65,7 @@ function redactedStaffSettings(E,staff){
 /* ---- job normalisation (mirrors guided-app.js syncPrepIntoEngineFields) ---- */
 const BASE_COLORS={'gray':'Gray','light-gray':'Light gray','charcoal':'Charcoal','beige':'Beige / sand','taupe':'Taupe','white':'White','off-white':'Off-white','black':'Black','slate-blue':'Slate blue','sage':'Sage'};
 const FLAKE_BLENDS={'neutral-gray':'Neutral gray blend','black-white':'Black & white','brown-tan':'Brown / tan','beige-cream':'Beige / cream','charcoal-silver':'Charcoal / silver','salt-pepper':'Salt & pepper'};
-const PREP_LABELS={cracks:'Cracks / joint issues',spalling:'Spalling / soft concrete',coatingRemoval:'Existing coating / paint removal',patching:'Patching / hole repair',leveling:'Self-leveling needed'};
+const PREP_LABELS={cracks:'Cracks / joint issues',spalling:'Poor slab / spalling',coatingRemoval:'Coating removal',paintRemoval:'Paint removal',patching:'Patching / hole repair',leveling:'Self-leveling needed',adhesive:'Adhesive / mastic removal'};
 function resolveBaseColor(a){
   if(a.colorKey==='custom'){return (a.customColor||a.color||'Custom color').trim()||'Custom color'}
   if(a.colorKey&&BASE_COLORS[a.colorKey])return BASE_COLORS[a.colorKey];
@@ -82,6 +82,7 @@ function computeAreaSqft(a){
 }
 function prepareJob(E,raw){
   const j=Object.assign(E.newJob(),clone(raw||{}));
+  if(E.blankExtras)j.extras=Object.assign(E.blankExtras(),j.extras||{});
   j.areas=Array.isArray(j.areas)&&j.areas.length?j.areas:[E.newArea()];
   j.catalogItems=Array.isArray(j.catalogItems)?j.catalogItems:[];
   let patch=0,anyRemoval=false,anyAdhesive=false;
@@ -237,7 +238,7 @@ function customerSnapshot(E,job,x,settings){
     scope:(job.areas||[]).filter(a=>n(computeAreaSqft(a))).map(a=>({name:a.name||'Area',sqft:n(computeAreaSqft(a)),description:E.describe(a),
       grip:!!a.grip,topcoat:!!(a.topcoat&&a.topcoat!=='none'),moisture:!!a.moisture,color:a.color||'',flakeBlend:a.style==='flake'?(a.flakeBlendLabel||''):''})),
     prepNotes,
-    totals:{base:n(x.base),adjustment:n(sel.adjustment),minimum:n(x.minimum),discount:n(x.discount),subtotal:n(x.subtotal),
+    totals:{base:n(x.base),adjustment:n(sel.adjustment),minimum:n(x.minimum),minimumLabel:x.minimumLabel||'',discount:n(x.discount),subtotal:n(x.subtotal),
       taxPct:n(job.tax),salesTax:n(x.salesTax),total:n(x.total),perSqft:n(x.perSqft)},
     selected:{key:sel.key||'regular',label:sel.label||'',short:sel.short||'',rate:n(sel.rate),payments:(sel.payments||[]).map(p=>({pct:n(p.pct),label:String(p.label||''),amount:n(p.amount)}))},
     options:Object.values(x.choices||{}).map(c=>({key:c.key,label:c.label,rate:n(c.rate),total:n(c.total),savings:n(c.savings),savingsPct:n(c.savingsPct),savingsBasis:'full quote total',

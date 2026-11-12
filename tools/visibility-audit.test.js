@@ -166,12 +166,13 @@ check('garage packages keep flake-tier pricing and block sealer, custom, critica
   safe.catalog.garage.prepAdj.leveling=-3150;
   const flake=E.calculate(garageJob('2car','flake'),safe);
   assert.strictEqual(flake.quoteReady,true);
-  assert.strictEqual(flake.catalog.scopeTotal,4500);
-  assert.strictEqual(flake.total,4500);
+  assert.strictEqual(flake.catalog.scopeTotal,5500);
+  assert.strictEqual(flake.total,5500);
   const solid=E.calculate(garageJob('2car','solid'),safe);
   assert.strictEqual(solid.quoteReady,true);
-  assert.strictEqual(solid.catalog.scopeTotal,4500-1350);
-  assert.strictEqual(solid.total,3150);
+  assert.strictEqual(solid.catalog.scopeTotal,4450);
+  assert.strictEqual(solid.total,4450);
+  assert.ok(!solid.lines.some(l=>l.total<0));
   const one=E.calculate(garageJob('1car','sealer'),safe);
   assert.strictEqual(one.quoteReady,false);
   assert.strictEqual(one.catalog.scopeTotal,2500);
@@ -187,11 +188,11 @@ check('garage packages keep flake-tier pricing and block sealer, custom, critica
   criticalJob.garageCondition='critical';
   const critical=E.calculate(criticalJob,safe);
   assert.strictEqual(critical.quoteReady,false);
-  assert.strictEqual(critical.catalog.scopeTotal,4500);
+  assert.strictEqual(critical.catalog.scopeTotal,5500);
   assert.ok(critical.pendingReasons.some(r=>/Critical slab/.test(r)));
   const leveled=E.calculate(garageJob('3car','flake',{leveling:true}),safe);
   assert.strictEqual(leveled.quoteReady,false);
-  assert.strictEqual(leveled.catalog.scopeTotal,6500);
+  assert.strictEqual(leveled.catalog.scopeTotal,7200);
   assert.ok(leveled.pendingReasons.some(r=>/Leveling on a garage package/.test(r)));
   assert.strictEqual(P.SOURCED_ESTIMATES.length,0);
   assert.strictEqual(E.defaults.catalog.garage.materialAdj.sealer,null);
@@ -199,6 +200,7 @@ check('garage packages keep flake-tier pricing and block sealer, custom, critica
 
 check('a credit larger than the flake-tier start still blocks without a free quote',()=>{
   const s=JSON.parse(JSON.stringify(E.defaults));
+  s.garage.packages=null;
   s.catalog.garage.materialAdj.solid={oneCar:-3000,twoCar:-1350,threeCar:-1950};
   const j=garageJob('1car','solid');
   j.priceOption='opt1';
@@ -226,7 +228,7 @@ check('configured unknown condition still prices',()=>{
   j.garageCondition='unknown';
   const ready=E.calculate(j,s);
   assert.strictEqual(ready.quoteReady,true);
-  assert.strictEqual(ready.total,4500+150);
+  assert.strictEqual(ready.total,5500+150);
 });
 
 check('flake yield factors stay at the current flagged values',()=>{

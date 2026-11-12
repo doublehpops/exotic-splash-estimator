@@ -21,6 +21,7 @@ const FLATWORK_WARN=3000, SEATING_WARN=500;
 const ADDON_WARN=5000, ADDON_BLOCK=25000; /* one catalog add-on, absolute dollars (credits included) */
 const CATALOG_ADJ_MAPS=['prepAdj','conditionAdj','materialAdj','topcoatAdj'];
 const PER_SQFT_RATE_KEYS=['solid','flake','metallic','sealer','level','removal','moisture','extraCoat','mediumFlakeExtra','fullFlakeExtra'];
+const EXTRA_SQFT_KEYS=[['coatingRemoval','Coating removal / sq ft'],['paintRemoval','Paint removal / sq ft'],['adhesiveRemoval','Adhesive / mastic removal / sq ft'],['poorSlab','Poor slab / sq ft'],['antiSlip','Anti-slip additive / sq ft']];
 const RATE_LABELS={
   solid:'Solid epoxy / sq ft',
   flake:'Flake epoxy / sq ft',
@@ -89,6 +90,12 @@ function collectBook(settings){
     if(!hit)continue;
     (hit.level==='block'?blocks:warnings).push(hit);
   }
+  const extras=(settings&&settings.extras)||{};
+  for(const [key,label] of EXTRA_SQFT_KEYS){
+    const hit=perSqftIssue(label,extras[key]&&extras[key].perSqft);
+    if(!hit)continue;
+    (hit.level==='block'?blocks:warnings).push(hit);
+  }
   const addOn=(settings&&settings.addOn)||{};
   for(const [key,label] of [['low','Standard add-in / sq ft'],['high','Higher add-in / sq ft']]){
     const hit=perSqftIssue(label,addOn[key]);
@@ -116,6 +123,12 @@ function guardSettings(settings){
   for(const key of PER_SQFT_RATE_KEYS){
     const hit=perSqftIssue(RATE_LABELS[key]||key,next.rates[key]);
     if(hit&&hit.level==='block')next.rates[key]=null;
+  }
+  next.extras=next.extras||{};
+  for(const [key,label] of EXTRA_SQFT_KEYS){
+    if(!next.extras[key])continue;
+    const hit=perSqftIssue(label,next.extras[key].perSqft);
+    if(hit&&hit.level==='block'){next.extras[key].perSqft=0;next.extras[key].min=0;}
   }
   next.addOn=next.addOn||{};
   for(const key of ['low','high']){

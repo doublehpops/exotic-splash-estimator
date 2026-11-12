@@ -41,7 +41,7 @@ function render(payload,acceptance){
   <h2>Pricing</h2>
   <table class="est-table"><thead><tr><th>Item</th><th class="num">Qty</th><th class="num">Amount</th></tr></thead><tbody>${rows||'<tr><td colspan="3">See total</td></tr>'}</tbody></table>
   <table class="est-totals"><tbody>
-    ${t.minimum?`<tr><td>Minimum job adjustment</td><td class="num">${cash(t.minimum)}</td></tr>`:''}
+    ${t.minimum?`<tr><td>${esc(t.minimumLabel||'Minimum job adjustment')}</td><td class="num">${cash(t.minimum)}</td></tr>`:''}
     ${t.discount?`<tr><td>Approved adjustment</td><td class="num">−${cash(t.discount)}</td></tr>`:''}
     <tr><td>Subtotal</td><td class="num">${ready?cash(t.subtotal):'Pending'}</td></tr>
     ${t.salesTax?`<tr><td>Sales tax (${num(t.taxPct,2)}%)</td><td class="num">${cash(t.salesTax)}</td></tr>`:''}

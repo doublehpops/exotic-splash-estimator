@@ -23,11 +23,12 @@ const STEPS=[
   {id:'review',label:'Review & export',short:'06'}
 ];
 const PREP_ITEMS=[
-  {key:'cracks',label:'Cracks / joint issues',help:'Note size and movement. Major structural cracks need separate scope.',links:'notes'},
-  {key:'spalling',label:'Spalling / soft concrete',help:'Spalling means the concrete surface is flaking or crumbling. It may need patching. Confirm on site.',links:'patch'},
-  {key:'coatingRemoval',label:'Existing coating / paint removal',help:'Adds removal rate across measured sq ft.',links:'removal'},
+  {key:'cracks',label:'Cracks / joint issues',help:'$250 up to 10 linear ft, then $12 per ft. Enter the length when this is checked.',links:'notes'},
+  {key:'spalling',label:'Poor slab / spalling',help:'Spalling means the surface is flaking or crumbling. Adds $0.75 per sq ft, $400 minimum, on this area.',links:'patch'},
+  {key:'coatingRemoval',label:'Coating removal',help:'$1.50 per sq ft, $650 minimum, on this area’s square feet.',links:'removal'},
+  {key:'paintRemoval',label:'Paint removal',help:'Thin paint only. $1.25 per sq ft, $250 minimum, on this area.',links:'removal'},
   {key:'patching',label:'Patching / hole repair',help:'Uses patch kit allowance from rate book.',links:'patch'},
-  {key:'leveling',label:'Self-leveling needed',help:'Sets leveling on the area with entered average depth.',links:'level'}
+  {key:'leveling',label:'Self-leveling needed',help:'Sets leveling on the area with entered average depth. The leveling rate stays $6 per sq ft at 1/4 inch.',links:'level'}
 ];
 const CONDITION_RATINGS=[
   {id:'unknown',label:'Not inspected'},
@@ -123,7 +124,7 @@ function guidedArea(base){
   a.conditionRating=a.conditionRating||'unknown';
   a.conditionNotes=a.conditionNotes||'';
   a.conditionPhotos=Array.isArray(a.conditionPhotos)?a.conditionPhotos:[];
-  a.prep=Object.assign({cracks:false,spalling:false,moisture:false,coatingRemoval:false,patching:false,leveling:false,patchKits:0,removalSqft:null,levelDepth:0.25,adhesive:false},a.prep||{});
+  a.prep=Object.assign({cracks:false,crackLf:0,spalling:false,moisture:false,coatingRemoval:false,paintRemoval:false,patching:false,leveling:false,patchKits:0,removalSqft:null,levelDepth:0.25,adhesive:false},a.prep||{});
   a.topcoat=a.topcoat||'protective';
   a.textureNote=a.textureNote||'';
   // Per-area moisture: default OFF. Prefer explicit a.moisture, else prep.moisture. Never inherit job-global here.
@@ -176,7 +177,8 @@ function guidedJob(base){
   j.garageStyle=j.garageStyle||'flake';
   j.garageTopcoat=j.garageTopcoat||'protective';
   j.garageCondition=j.garageCondition||'unknown';
-  j.garagePrep=Object.assign({cracks:false,spalling:false,coatingRemoval:false,patching:false,leveling:false,moisture:false},j.garagePrep||{});
+  j.garagePrep=Object.assign({cracks:false,crackLf:0,spalling:false,coatingRemoval:false,paintRemoval:false,patching:false,leveling:false,moisture:false},j.garagePrep||{});
+  if(E.blankExtras)j.extras=Object.assign(E.blankExtras(),j.extras||{});
   j.catalogItems=Array.isArray(j.catalogItems)?j.catalogItems:[];
   // v5/v6: moisture is PER-AREA only. Job-global moistureBarrier / job.moisture do NOT charge.
   // Historical area prep.moisture / a.moisture retained via guidedArea.
@@ -745,19 +747,51 @@ function projectTypePickerHTML(j){
   ];
   return `<div class="project-type-grid">${types.map(([id,label,help])=>`<button type="button" class="project-type-card ${j.projectType===id?'active':''}" data-project-type="${id}" aria-pressed="${j.projectType===id}"><span class="opt-name">${escape(label)}</span><span class="opt-meta">${escape(help)}</span></button>`).join('')}</div>`;
 }
+function optionalExtrasHTML(j,base){
+  const ex=j.extras||{};
+  const root=base+'.extras';
+  return `<details class="more-options"><summary>Optional extras</summary><div class="detail-body">
+    <p class="method-note">Off until you enter a quantity or check a box. These lines stay at their own prices on every tier. Rush and weekend add together; they do not multiply. Moisture primer stays $4/sq ft and self-leveling stays $6/sq ft at 1/4 inch.</p>
+    <div class="fields three">
+      ${field('Solid stairs (steps)',root+'.stairsSolid','number','$85 per step')}
+      ${field('Flake stairs (steps)',root+'.stairsFlake','number','$110 per step')}
+      ${field('Stem walls / cove (ft)',root+'.stemWallLf','number','$9 per linear ft')}
+      ${field('Countertop / bar (sq ft)',root+'.countertopSqft','number','$45 solid or $65 metallic, $900 minimum')}
+      ${select('Countertop system',root+'.countertopStyle',[['solid','Solid — $45/sq ft'],['metallic','Metallic — $65/sq ft']])}
+      ${field('Moving (hours, 2 people)',root+'.movingHours','number','$150 per hour')}
+      ${field('Winter heat (days)',root+'.winterHeatDays','number','$250 per day')}
+      ${field('Extra site visits',root+'.extraVisits','number','$125 each')}
+      ${select('Warranty',root+'.warrantyYears',[[1,'1 year included'],[3,'3 years — add 4% of this tier']])}
+    </div>
+    <div class="area-options">
+      ${checkbox('Travel charge past 25 miles ($2.50/mile each way)',root+'.travel')}
+      ${checkbox('Fuel and vehicle wear ($0.65/mile round trip)',root+'.fuel')}
+      ${checkbox('Per-job consumables ($150)',root+'.consumables')}
+      ${checkbox('Rush — within 7 days (+10%)',root+'.rush')}
+      ${checkbox('Weekend (+15%)',root+'.weekend')}
+    </div>
+    ${ex.crackLf?field('Job crack length if not entered on an area (ft)',root+'.crackLf','number'):''}
+  </div></details>`;
+}
 function garagePackageHTML(j){
   const pkgs=[['1car','1-car package'],['2car','2-car package'],['3car','3-car package'],['measured','>3-car / measured sq ft']];
   const cat=(state.settings.catalog&&state.settings.catalog.garage)||{};
-  const flakeRate=(()=>{const opt=j.priceOption&&j.priceOption!=='regular'&&state.settings.pricingOptions&&state.settings.pricingOptions[j.priceOption];if(opt&&opt.rates&&opt.rates.flake!=null&&opt.rates.flake!=='')return E.n(opt.rates.flake);return E.n((state.settings.rates||{}).flake);})();
   const startFor=p=>{
     const key=p==='1car'?'oneCar':p==='2car'?'twoCar':p==='3car'?'threeCar':null;
     if(!key)return 'Uses floor sq ft rates';
+    const tier=j.priceOption||'regular';
+    const style=j.garageStyle||'flake';
+    const table=state.settings.garage&&state.settings.garage.packages;
+    const cell=table&&table[tier]&&table[tier][style]&&table[tier][style][key];
+    if(E.isConfigured(cell))return cash(Number(cell))+' package';
+    const opt=j.priceOption&&j.priceOption!=='regular'&&state.settings.pricingOptions&&state.settings.pricingOptions[j.priceOption];
+    const flakeRate=opt&&opt.rates&&opt.rates.flake!=null&&opt.rates.flake!==''?E.n(opt.rates.flake):E.n((state.settings.rates||{}).flake);
     const sf=E.n((cat.packageSqft&&cat.packageSqft[key])||(E.defaults.catalog.garage.packageSqft||{})[key]);
     return sf&&flakeRate?cash(flakeRate*sf)+' base':'Starting price needed';
   };
   return `<div class="fields">${pkgs.map(([id,label])=>'').join('')}
     <div class="finish-picker" role="group">${pkgs.map(([id,label])=>`<button type="button" class="finish-choice ${j.garagePackage===id?'active':''}" data-garage-package="${id}" aria-pressed="${j.garagePackage===id}"><b>${escape(label)}</b><small style="display:block;margin-top:4px;font-size:10px;color:var(--muted)">${escape(startFor(id))}</small></button>`).join('')}</div>
-    ${j.garagePackage!=='measured'?`${(cat.disclaimer||'').trim()?`<div class="warn-banner"><b>Garage package baseline:</b> ${escape(cat.disclaimer.trim())}</div>`:''}<div class="notice">Base fee = the selected tier’s flake rate × the typical size: <b>1-car 250 sq ft</b>, <b>2-car 450 sq ft</b>, <b>3-car 650 sq ft</b>. Option 1 is $2,000 / $3,600 / $5,200. Option 2 is $2,250 / $4,050 / $5,850. Regular is $2,500 / $4,500 / $6,500. Square feet above that size use the selected tier’s rate for the chosen system. Solid credit −$750 / −$1,350 / −$1,950 is subtracted. The $2,000 minimum still applies.</div>
+    ${j.garagePackage!=='measured'?`${(cat.disclaimer||'').trim()?`<div class="warn-banner"><b>Garage package baseline:</b> ${escape(cat.disclaimer.trim())}</div>`:''}<div class="notice">Package price comes from the tier, system, and size table (1-car 250 sq ft, 2-car 450 sq ft, 3-car 650 sq ft). Square feet above that size use that tier’s per-sq-ft rate for the chosen system. The solid credit is not subtracted when the table has a price. A solid package under 500 sq ft is at least $2,750 in every tier, so 1-car solid Option 1 is $2,750. The $2,000 job minimum still applies.</div>
       <div class="fields">${field('Measured sq ft','job.areas.0.sqft','number','Leave blank to price the typical size only. Square feet above 250 / 450 / 650 use the tier rate.','step="1"')}</div>
       <div class="fields three">
         ${select('Material / system','job.garageStyle',[['solid','Solid'],['flake','Flake'],['metallic','Metallic'],['sealer','Clear seal — use measured sq ft'],['custom','Custom — inspection / override']])}
@@ -765,12 +799,14 @@ function garagePackageHTML(j){
         ${select('Concrete condition','job.garageCondition',[['unknown','Unknown / not inspected'],['good','Good'],['fair','Fair'],['poor','Poor'],['critical','Critical'],['sound','Sound / bare'],['paint','Paint / coating present'],['adhesive','Adhesive residue']])}
       </div>
       <p class="hint">Spalling means the concrete surface is flaking or crumbling.</p>
-      <div class="checklist">${[['cracks','Cracks / joints'],['spalling','Spalling (surface flaking)'],['coatingRemoval','Coating removal'],['patching','Patching'],['leveling','Leveling'],['moisture','Moisture barrier']].map(([k,l])=>{
+      <div class="checklist">${[['cracks','Cracks / joints'],['spalling','Poor slab / spalling'],['coatingRemoval','Coating removal'],['paintRemoval','Paint removal'],['patching','Patching'],['leveling','Leveling'],['moisture','Moisture barrier']].map(([k,l])=>{
         const on=!!(j.garagePrep&&j.garagePrep[k]);
         const hint=k==='leveling'?'Not a flat package price. Leveling on a package stays unfinished until it is measured by area and depth.':'Changes the price when that prep item has a price in the rate book.';
         return `<label class="check-item ${on?'active':''}"><input type="checkbox" data-path="job.garagePrep.${k}" ${on?'checked':''}><div><b>${escape(l)}</b><div class="hint">${hint}</div></div></label>`;
       }).join('')}</div>
-      <p class="method-note">Photos / inspection notes: use Areas & Prep steps. Unknown condition never silently means $0.</p>`
+      ${(j.garagePrep&&j.garagePrep.cracks)?field('Crack repair length (linear ft)','job.garagePrep.crackLf','number','$250 up to 10 ft, then $12 per ft.','step="1"'):''}
+      ${optionalExtrasHTML(j,'job')}
+      <p class="method-note">Photos / inspection notes: use Areas & Prep steps. Unknown condition never silently means $0. Coating, paint, adhesive, and poor slab use the actual measured sq ft, including overflow past the package size.</p>`
       :`<div class="notice"><b>>3-car / measured:</b> use the guided floor measurement workflow (tape / rectangles) and existing floor rate book. Flat 1/2/3-car starting prices do <b>not</b> apply.</div>`}`;
 }
 function flatworkItemsHTML(j){
@@ -935,8 +971,9 @@ function stepPrep(j){
       <details class="more-options"><summary>More options</summary><div class="detail-body">
       <div class="fields">
         ${(a.prep&&(a.prep.patching||a.prep.spalling))?field('Patch kits (this area)',base+'.prep.patchKits','number','Links to patch rate in rate book','step="1"'):''}
-        ${(a.prep&&a.prep.leveling)?field('Avg leveling depth (in)',base+'.prep.levelDepth','number','¼ inch = 0.25. Maximum 2 inches.','min="0" max="2" step="0.125" inputmode="decimal"'):''}
-        ${checkbox('Adhesive residue (glue left on the floor, not paint)',base+'.prep.adhesive')}
+        ${(a.prep&&a.prep.cracks)?field('Crack length (linear ft)',base+'.prep.crackLf','number','$250 up to 10 ft, then $12/ft. Blank still uses the $250 flat.','step="1"'):''}
+        ${(a.prep&&a.prep.leveling)?field('Avg leveling depth (in)',base+'.prep.levelDepth','number','¼ inch = 0.25. Maximum 2 inches. Leveling stays $6/sq ft at 1/4 inch.','min="0" max="2" step="0.125" inputmode="decimal"'):''}
+        ${checkbox('Adhesive / mastic removal ($1.50/sq ft, $350 minimum)',base+'.prep.adhesive')}
       </div>
       ${textArea('Inspection notes / concerns',base+'.conditionNotes','Also kept in the job history when the concern changes.')}
       <h4>Condition photos</h4>
@@ -944,6 +981,7 @@ function stepPrep(j){
       </div></details>
     </section>`;
   }).join('')}
+  ${optionalExtrasHTML(j,'job')}
   <details class="more-options"><summary>More options</summary><div class="detail-body">
   ${textArea('Job-level issues / concerns','job.jobConcerns','Stored on the job and copied into history when changed.')}
   <h4>Change history</h4>
@@ -1304,7 +1342,41 @@ function ratesView(){
   <details open><summary>Customer selling rates ${owner?'':'🔒'}</summary><div class="detail-body"><div class="fields three">${Object.entries({solid:'Solid epoxy / sq ft',flake:'Flake epoxy / sq ft',metallic:'Metallic epoxy / sq ft',sealer:'Clear seal / sq ft',level:'Leveling / sq ft at ¼ inch',removal:'Extra removal / sq ft',moisture:'Moisture control / sq ft',extraCoat:'Additional solid base coat / sq ft',mediumFlakeExtra:'Medium flake premium / sq ft',fullFlakeExtra:'Full flake premium / sq ft'}).map(([k,v])=>lockedField(v,'settings.rates.'+k,'number','$0–$40 per sq ft. Above $20 asks the owner to confirm.','min="0" max="40" step="0.01" inputmode="decimal"')).join('')}${lockedField('Patch / kit installed','settings.rates.patch','number')}</div></div></details>
   <details open><summary>Payment tiers & property add-in ${owner?'':'🔒'}</summary><div class="detail-body"><p>Regular is 7 / 10 / 15. Option 1 is bank transfer, 5 / 8 / 11, half at booking and half at the final walkthrough. Option 2 is 6 / 9 / 13, with 50%, 25%, and 25% within 14 days. Tiers do not stack and there is no extra 40% off. Prep and removal stay at their own prices. No material surcharge is added.</p>${['opt1','opt2'].map(k=>`<div class="fields three" style="margin-bottom:14px">${lockedField('Option label','settings.pricingOptions.'+k+'.label')}${lockedField('Solid / sq ft','settings.pricingOptions.'+k+'.rates.solid','number','$0–$40 per sq ft.','min="0" max="40" step="0.01" inputmode="decimal"')}${lockedField('Flake / sq ft','settings.pricingOptions.'+k+'.rates.flake','number','$0–$40 per sq ft.','min="0" max="40" step="0.01" inputmode="decimal"')}${lockedField('Metallic / sq ft','settings.pricingOptions.'+k+'.rates.metallic','number','$0–$40 per sq ft.','min="0" max="40" step="0.01" inputmode="decimal"')}${state.settings.pricingOptions[k].schedule.map((p,i)=>lockedField((p.label||('Payment '+(i+1)))+' %','settings.pricingOptions.'+k+'.schedule.'+i+'.pct','number')).join('')}</div>`).join('')}
   <p class="method-note">The property / trip add-in is folded into the base price. It is not a separate line. Defaults stay at $0.</p>
-  ${lockedField('Minimum job charge ($)','settings.rates.minimumJob','number','Applied to the subtotal before the payment split. An owner-approved discount can go below it. Employees cannot.'+statusTag(E.FIGURE_STATUS.minimumJob),'min="0" step="1"')}
+  ${lockedField('Minimum job charge ($)','settings.rates.minimumJob','number','Applied with the small-solid floor. The higher one wins. An owner-approved discount can go below it. Employees cannot.'+statusTag(E.FIGURE_STATUS.minimumJob),'min="0" step="1"')}
+  ${lockedField('Small solid floor — under (sq ft)','settings.rates.smallSolidFloor.maxSqft','number','A solid-system job whose solid sq ft is under this size uses the floor below, in every tier. Count is the job total, not each area.')}
+  ${lockedField('Small solid floor minimum ($)','settings.rates.smallSolidFloor.min','number','Default $2,750 under 500 sq ft. 1-car solid Option 1 ($2,600) becomes $2,750.')}
+  </div></details>
+  <details><summary>Optional extras ${owner?'':'🔒'}</summary><div class="detail-body">
+  <p class="method-note">Selling prices for optional lines. Moisture primer and self-leveling stay on the rates above ($4/sq ft and $6/sq ft at 1/4 inch). Per-sq-ft extras above $40 are blocked.</p>
+  <div class="fields three">
+    ${lockedField('Crack repair flat ($)','settings.extras.crackRepair.flat','number')}
+    ${lockedField('Crack repair included (ft)','settings.extras.crackRepair.includedLf','number')}
+    ${lockedField('Crack repair after that ($/ft)','settings.extras.crackRepair.perLf','number')}
+    ${lockedField('Coating removal ($/sq ft)','settings.extras.coatingRemoval.perSqft','number','$0–$40')}
+    ${lockedField('Coating removal minimum ($)','settings.extras.coatingRemoval.min','number')}
+    ${lockedField('Paint removal ($/sq ft)','settings.extras.paintRemoval.perSqft','number')}
+    ${lockedField('Paint removal minimum ($)','settings.extras.paintRemoval.min','number')}
+    ${lockedField('Adhesive removal ($/sq ft)','settings.extras.adhesiveRemoval.perSqft','number')}
+    ${lockedField('Adhesive removal minimum ($)','settings.extras.adhesiveRemoval.min','number')}
+    ${lockedField('Poor slab ($/sq ft)','settings.extras.poorSlab.perSqft','number')}
+    ${lockedField('Poor slab minimum ($)','settings.extras.poorSlab.min','number')}
+    ${lockedField('Stairs solid ($/step)','settings.extras.stairs.solid','number')}
+    ${lockedField('Stairs flake ($/step)','settings.extras.stairs.flake','number')}
+    ${lockedField('Stem wall / cove ($/ft)','settings.extras.stemWall.perLf','number')}
+    ${lockedField('Countertop solid ($/sq ft)','settings.extras.countertop.solid','number')}
+    ${lockedField('Countertop metallic ($/sq ft)','settings.extras.countertop.metallic','number')}
+    ${lockedField('Countertop minimum ($)','settings.extras.countertop.min','number')}
+    ${lockedField('Anti-slip ($/sq ft)','settings.extras.antiSlip.perSqft','number')}
+    ${lockedField('Travel past 25 miles ($/mile)','settings.extras.travelBeyond.perMile','number')}
+    ${lockedField('Moving ($/hour)','settings.extras.moving.perHour','number')}
+    ${lockedField('Rush (%)','settings.extras.rush.pct','number')}
+    ${lockedField('Weekend (%)','settings.extras.weekend.pct','number')}
+    ${lockedField('Winter heat ($/day)','settings.extras.winterHeat.perDay','number')}
+    ${lockedField('Consumables ($)','settings.extras.consumables.flat','number')}
+    ${lockedField('Fuel and wear ($/mile)','settings.extras.fuelWear.perMile','number')}
+    ${lockedField('Extra site visit ($)','settings.extras.extraVisit.flat','number')}
+    ${lockedField('3-year warranty (%)','settings.extras.warranty.pct','number')}
+  </div>
   </div></details>
   ${authMode()&&!owner?'<div class="info-banner es-costs-hidden"><b>Internal costs are owner-only.</b> Materials, labor, travel, equipment and overhead costs, markup, profit and margin are not sent to employee devices.</div>':`<details open><summary>Materials, labor, travel, equipment, overhead ${owner?'':'🔒'}</summary><div class="detail-body">${overheadPanelHTML()}
   <div class="fields three">${lockedCField('Loaded labor / person-hour ($)','labor','',E.FIGURE_STATUS.labor)}${lockedCField('Vehicle cost / mile ($)','mile','Fuel stays per job. Travel folds into internal overhead.',E.FIGURE_STATUS.mile)}${lockedCField('Material waste (%)','waste','',E.FIGURE_STATUS.waste)}${lockedCField('Materials purchase tax (%)','purchaseTax','Chicago 10.5% since Aug 1 2026. Customer sales tax on installed floors stays 0.',E.FIGURE_STATUS.purchaseTax)}${lockedCField('Setup / cleanup person-hrs per job','setupHours','',E.FIGURE_STATUS.setupHours)}${lockedCField('Billable person-hours / month','billableHoursPerMonth','4 people × about 112 hours. The per-hour rate is monthly overhead divided by this.',E.FIGURE_STATUS.billableHoursPerMonth)}${lockedCField('Contingency reserve (%)','contingency')}${lockedCField('Grind sq ft / person-hr','grindProduction','',E.FIGURE_STATUS.grindProduction)}${lockedCField('Base coat sq ft / person-hr','baseProduction','',E.FIGURE_STATUS.baseProduction)}${lockedCField('Flake broadcast sq ft / person-hr','flakeProduction','',E.FIGURE_STATUS.flakeProduction)}${lockedCField('Topcoat sq ft / person-hr','topProduction','',E.FIGURE_STATUS.topProduction)}${lockedCField('Metallic sq ft / person-hr','metallicProduction','',E.FIGURE_STATUS.metallicProduction)}${lockedCField('Solid material $ / sq ft','materialPerSqft.solid','Internal cost only.',E.FIGURE_STATUS.materialSolid)}${lockedCField('Flake material $ / sq ft','materialPerSqft.flake','Internal cost only.',E.FIGURE_STATUS.materialFlake)}${lockedCField('Metallic material $ / sq ft','materialPerSqft.metallic','Internal cost only.',E.FIGURE_STATUS.materialMetallic)}</div>
@@ -1316,7 +1388,9 @@ function ratesView(){
   </div></details>`}
   <details><summary>Business wording ${owner?'':'🔒'}</summary><div class="detail-body"><div class="fields">${lockedField('Business name','settings.business.name')}${lockedField('Business phone','settings.business.phone')}${lockedField('Business address','settings.business.address')}${lockedField('Business email','settings.business.email','email')}${owner?textArea('Competitive pricing review wording','settings.notes'):`<div class="field locked"><label>Competitive pricing review wording <span class="lock-pill">OWNER ONLY</span></label><textarea disabled readonly>${escape(state.settings.notes||'')}</textarea></div>`}</div></div></details>
   <details open><summary>Catalog packages — starting prices & adjustments ${owner?'':'🔒'}</summary><div class="detail-body">
-  <div class="notice"><b>Garage base fee</b> = selected tier flake rate × typical size (1-car 250 sq ft, 2-car 450 sq ft, 3-car 650 sq ft). Option 1 $2,000 / $3,600 / $5,200. Option 2 $2,250 / $4,050 / $5,850. Regular $2,500 / $4,500 / $6,500. Overflow uses that tier’s rate for the chosen system. Solid credit −$750 / −$1,350 / −$1,950. The $2,000 minimum still applies. Flatwork above 32 sq ft is quoted per sq ft.</div>
+  <div class="notice"><b>Garage packages</b> use the tier / system / size table. Overflow past 250 / 450 / 650 sq ft uses that tier’s rate for the system. The solid credit is kept for books with no table. A solid package under 500 sq ft is at least $2,750. Flatwork above 32 sq ft is quoted per sq ft.</div>
+  <h4 style="margin:12px 0 6px;font-size:13px">Package price table</h4>
+  ${[['opt1','Option 1'],['opt2','Option 2'],['regular','Regular']].map(([tier,label])=>`<h4 style="margin:10px 0 6px;font-size:13px">${label}</h4><div class="fields three">${['solid','flake','metallic'].map(sys=>['oneCar','1-car','twoCar','2-car','threeCar','3-car'].reduce((html,part,i,arr)=>{if(i%2)return html;return html+lockedField(sys+' '+arr[i+1]+' ($)','settings.garage.packages.'+tier+'.'+sys+'.'+part,'number');},'')).join('')}</div>`).join('')}
   <h4 style="margin:12px 0 6px;font-size:13px">Garage packages</h4>
   ${((state.settings.catalog&&state.settings.catalog.garage&&state.settings.catalog.garage.disclaimer)||'').trim()?`<div class="warn-banner"><b>Garage package baseline:</b> ${escape(String(state.settings.catalog.garage.disclaimer).trim())}</div>`:''}
   <div class="fields three">${lockedField('1-car typical sq ft','settings.catalog.garage.packageSqft.oneCar','number','Base fee uses this size × the flake tier rate.')}${lockedField('2-car typical sq ft','settings.catalog.garage.packageSqft.twoCar','number')}${lockedField('3-car typical sq ft','settings.catalog.garage.packageSqft.threeCar','number')}</div>
@@ -1729,7 +1803,7 @@ function customerDocument(){
   }).join('<br/>');
   const blockedDoc=(x.blockingIssues||[]).length>0;
   const totalBlock=x.quoteReady
-    ?`<div class="doc-total">${x.selected.breakdown?`<div><span>Finish</span><span>${cash(x.selected.breakdown.finishAmount)}</span></div><div><span>Separate extras</span><span>${cash(x.selected.breakdown.extrasAmount)}</span></div>`:''}${x.minimum?`<div><span>Minimum project adjustment</span><span>${cash(x.minimum)}</span></div>`:''}${x.discount?`<div><span>Approved extra discount</span><span>−${cash(x.discount)}</span></div>`:''}${x.salesTax?`<div><span>Sales tax (${num(j.tax)}%)</span><span>${cash(x.salesTax)}</span></div>`:''}<div class="grand"><span>Total ${j.docType==='invoice'?'price':'estimate'}</span><span>${cash(x.total)}</span></div><p class="method-note">A previously saved customer quote is not changed by opening this screen.</p>${x.sqft?`<div><span>Blended installed rate*</span><span>${cash(x.perSqft)} / sq ft</span></div>`:''}${x.selected.key!=='regular'?`<div><span>Below the regular full total</span><span>${cash(x.selected.savings)} (${num(x.selected.savingsPct)}% of that full total)</span></div>`:''}</div>`
+    ?`<div class="doc-total">${x.selected.breakdown?`<div><span>Finish</span><span>${cash(x.selected.breakdown.finishAmount)}</span></div><div><span>Separate extras</span><span>${cash(x.selected.breakdown.extrasAmount)}</span></div>`:''}${x.minimum?`<div><span>${escape(x.minimumLabel||'Minimum project adjustment')}</span><span>${cash(x.minimum)}</span></div>`:''}${x.discount?`<div><span>Approved extra discount</span><span>−${cash(x.discount)}</span></div>`:''}${x.salesTax?`<div><span>Sales tax (${num(j.tax)}%)</span><span>${cash(x.salesTax)}</span></div>`:''}<div class="grand"><span>Total ${j.docType==='invoice'?'price':'estimate'}</span><span>${cash(x.total)}</span></div><p class="method-note">A previously saved customer quote is not changed by opening this screen.</p>${x.sqft?`<div><span>Blended installed rate*</span><span>${cash(x.perSqft)} / sq ft</span></div>`:''}${x.selected.key!=='regular'?`<div><span>Below the regular full total</span><span>${cash(x.selected.savings)} (${num(x.selected.savingsPct)}% of that full total)</span></div>`:''}</div>`
     :blockedDoc
       ?`<div class="doc-total"><div class="grand"><span>Total ${j.docType==='invoice'?'price':'estimate'}</span><span class="pending-total">Needs fixing</span></div><div><span>Status</span><span>Not issued</span></div></div>`
       :`<div class="doc-total"><div class="grand"><span>Total ${j.docType==='invoice'?'price':'estimate'}</span><span class="pending-total">Pending — starting price needed</span></div><div><span>Status</span><span>Incomplete / not finalized</span></div></div>`;
@@ -2006,7 +2080,7 @@ document.addEventListener('input',e=>{
   if(!t.dataset.path)return;
   const path=String(t.dataset.path);
   // Worker preview: block rate-book / cost / product / business pricing edits (UX lock only — not security)
-  if(!isOwner()&&(path.startsWith('settings.rates')||path.startsWith('settings.costs')||path.startsWith('settings.products')||path.startsWith('settings.pricingOptions')||path.startsWith('settings.addOn')||path.startsWith('settings.catalog')||path.startsWith('settings.business')||path.startsWith('settings.approvedAdjustment')||path==='settings.notes'||path==='settings.costs.mile')){
+  if(!isOwner()&&(path.startsWith('settings.rates')||path.startsWith('settings.costs')||path.startsWith('settings.products')||path.startsWith('settings.pricingOptions')||path.startsWith('settings.addOn')||path.startsWith('settings.catalog')||path.startsWith('settings.business')||path.startsWith('settings.approvedAdjustment')||path.startsWith('settings.garage')||path.startsWith('settings.extras')||path==='settings.notes'||path==='settings.costs.mile')){
     toast('Owner-only in this preview. Rate book is locked for workers.');
     render();return;
   }
