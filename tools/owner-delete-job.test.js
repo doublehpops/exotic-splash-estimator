@@ -33,14 +33,27 @@ check('migration is present, unapplied, and owner-only before any delete',()=>{
   assert.ok(sql.includes('grant execute on function public.owner_delete_jobs(uuid[]) to authenticated'));
 });
 
-check('hard delete removes non-cascaded approvals, photos, and linkable acceptances',()=>{
+check('hard delete removes non-cascaded approvals and linkable acceptances',()=>{
   assert.ok(sql.includes('delete from public.discount_approvals d where d.estimate_id = v_id'));
-  assert.ok(sql.includes("o.bucket_id = 'job-photos'"));
-  assert.ok(sql.includes("o.name like v_id::text || '/%'"));
   assert.ok(sql.includes('delete from public.estimate_acceptances a where a.estimate_number = v_number'));
   assert.ok(sql.includes('if v_one = 1 then'));
   assert.ok(sql.includes('delete from public.jobs j where j.id = v_id'));
   assert.ok(sql.includes('public.owner_delete_jobs(p_job_ids uuid[])'));
+  assert.ok(!/delete\s+from\s+storage\.objects/i.test(sql));
+});
+
+function stripSqlComments(text){
+  return text.replace(/\/\*[\s\S]*?\*\//g,'').replace(/--[^\n]*/g,'');
+}
+
+check('no migration function deletes from storage.objects',()=>{
+  const dir=path.join(root,'supabase/migrations');
+  const names=fs.readdirSync(dir).filter(name=>name.endsWith('.sql'));
+  assert.ok(names.length>0);
+  for(const name of names){
+    const body=stripSqlComments(fs.readFileSync(path.join(dir,name),'utf8'));
+    assert.ok(!/delete\s+from\s+storage\.objects/i.test(body),name+' deletes from storage.objects');
+  }
 });
 
 check('directory and crew list stay free of emails and owner costs',()=>{
@@ -58,7 +71,8 @@ check('directory and crew list stay free of emails and owner costs',()=>{
 });
 
 check('client calls the owner RPC and can include archived rows',()=>{
-  assert.ok(cloud.includes("client.rpc('owner_delete_jobs',{p_job_ids:ids})"));
+  assert.ok(cloud.includes("client.rpc('owner_delete_jobs',{p_job_ids:list})"));
+  assert.ok(cloud.includes('removeJobPhotos'));
   assert.ok(cloud.includes("client.rpc('staff_directory')"));
   assert.ok(cloud.includes('includeArchived'));
   assert.ok(cloud.includes(".neq('status','archived')"));
@@ -92,5 +106,60 @@ check('job cards hide delete and archive unless the viewer is the owner',()=>{
   assert.ok(app.includes('assignedCrew'));
 });
 
-if(failed){console.error(failed+' failed');process.exit(1)}
-console.log('owner-delete-job tests passed');
+function mockClient(hooks){
+  const calls=[];
+  const storage={
+    list:async(folder,opts)=>{calls.push({op:'list',folder,opts});return hooks.list?hooks.list(folder,opts):{data:[],error:null}},
+    remove:async(paths)=>{calls.push({op:'remove',paths});return hooks.remove?hooks.remove(paths):{data:paths,error:null}}
+  };
+  return {
+    calls,
+    client:{
+      auth:{},
+      storage:{from(bucket){calls.push({op:'bucket',bucket});return storage}},
+      rpc:async(name,args)=>{calls.push({op:'rpc',name,args});if(hooks.rpc)return hooks.rpc(name,args);return {data:{ok:true},error:null}}
+    }
+  };
+}
+
+async function checkAsync(name,fn){try{await fn();console.log('ok',name);}catch(e){failed++;console.error('FAIL',name,e&&e.stack||e);}}
+
+(async()=>{
+  const Cloud=require('../js/es-cloud');
+  const jobId='11111111-1111-4111-8111-111111111111';
+  await checkAsync('photos are removed with the Storage API before the delete RPC',async()=>{
+    const mock=mockClient({
+      list:async()=>({data:[{name:'p.jpg',id:'obj-1',metadata:{size:10}},{name:'.emptyFolderPlaceholder',id:null,metadata:null}],error:null})
+    });
+    const api=Cloud.create(mock.client);
+    const result=await api.deleteJobs([jobId,jobId]);
+    assert.strictEqual(result.ok,true);
+    const ops=mock.calls.map(c=>c.op);
+    assert.deepStrictEqual(ops,['bucket','list','bucket','remove','rpc']);
+    assert.ok(ops.indexOf('remove')<ops.indexOf('rpc'));
+    const removed=mock.calls.find(c=>c.op==='remove');
+    assert.deepStrictEqual(removed.paths,[jobId+'/p.jpg']);
+    const rpc=mock.calls.find(c=>c.op==='rpc');
+    assert.strictEqual(rpc.name,'owner_delete_jobs');
+    assert.deepStrictEqual(rpc.args.p_job_ids,[jobId]);
+  });
+  await checkAsync('a photo removal failure does not call the delete RPC',async()=>{
+    const mock=mockClient({
+      list:async()=>({data:[{name:'p.jpg',id:'obj-1',metadata:{size:4}}],error:null}),
+      remove:async()=>({data:null,error:{message:'storage down'}})
+    });
+    const api=Cloud.create(mock.client);
+    await assert.rejects(()=>api.deleteJobs([jobId]),err=>err&&/not deleted/i.test(err.message));
+    assert.ok(mock.calls.some(c=>c.op==='remove'));
+    assert.ok(!mock.calls.some(c=>c.op==='rpc'));
+  });
+  await checkAsync('a photo list failure does not call the delete RPC',async()=>{
+    const mock=mockClient({list:async()=>({data:null,error:{message:'list failed'}})});
+    const api=Cloud.create(mock.client);
+    await assert.rejects(()=>api.deleteJobs([jobId]),err=>err&&/not deleted/i.test(err.message));
+    assert.ok(!mock.calls.some(c=>c.op==='remove'));
+    assert.ok(!mock.calls.some(c=>c.op==='rpc'));
+  });
+  if(failed){console.error(failed+' failed');process.exit(1)}
+  console.log('owner-delete-job tests passed');
+})();

@@ -10,8 +10,12 @@
 --    private.is_owner() runs before any delete. Employees are rejected.
 --    Cascades already remove job_owner_pricing, job_quotes (and job_quote_internal),
 --    and estimate_shares. This function also removes the rows that do not cascade:
---    discount_approvals (estimate_id), storage.objects in the job-photos bucket,
---    and estimate_acceptances when the job number matches exactly one job.
+--    discount_approvals (estimate_id), and estimate_acceptances when the job
+--    number matches exactly one job.
+--    Job photos are not removed here. storage.protect_objects_delete raises
+--    42501 unless storage.allow_delete_query is true, and that would roll back
+--    the whole delete. The client removes job-photos with the Storage API
+--    before it calls this function.
 
 do $migration$
 declare
@@ -86,7 +90,6 @@ declare
   v_number text;
   v_approvals integer := 0;
   v_acceptances integer := 0;
-  v_photos integer := 0;
   v_jobs integer := 0;
   v_n integer;
   v_one integer;
@@ -132,12 +135,6 @@ begin
       end if;
     end if;
 
-    delete from storage.objects o
-     where o.bucket_id = 'job-photos'
-       and o.name like v_id::text || '/%';
-    get diagnostics v_n = row_count;
-    v_photos := v_photos + v_n;
-
     delete from public.jobs j where j.id = v_id;
     get diagnostics v_n = row_count;
     v_jobs := v_jobs + v_n;
@@ -147,8 +144,7 @@ begin
     'ok', true,
     'jobs', v_jobs,
     'discount_approvals', v_approvals,
-    'estimate_acceptances', v_acceptances,
-    'photos', v_photos
+    'estimate_acceptances', v_acceptances
   );
 end;
 $$;
