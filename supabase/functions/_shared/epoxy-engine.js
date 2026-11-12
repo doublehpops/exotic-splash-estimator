@@ -238,14 +238,26 @@ function buildCatalogBreakdown(job,settings){
       }
     }
     const style=job.garageStyle||'flake';
-    const mat=resolveAdj(cat.garage.materialAdj,style,'Material / system ('+style+')',pending,adjustments,pkgKey);
-    const top=resolveAdj(cat.garage.topcoatAdj,job.garageTopcoat||'protective','Topcoat ('+(job.garageTopcoat||'protective')+')',pending,adjustments,pkgKey);
+    if(style==='sealer'){
+      pending.push('Clear seal is not a supported garage-package preset. A flat sealer adjustment can wipe the package start. Use measured square feet at the sealer selling rate instead. This quote stays blocked.');
+    } else if(style==='custom'){
+      pending.push('Custom garage scope is unresolved. Inspection and an owner override are required. No average was applied.');
+    }
+    if((job.garageCondition||'')==='critical'){
+      pending.push('Critical slab condition is unresolved. Inspection and an owner override are required. No average was applied.');
+    }
+    const prepOn=job.garagePrep||{};
+    if(prepOn.leveling){
+      pending.push('Leveling on a garage package is measured by area and depth only. No flat package leveling amount is applied.');
+    }
+    if(style!=='sealer'&&style!=='custom')resolveAdj(cat.garage.materialAdj,style,'Material / system ('+style+')',pending,adjustments,pkgKey);
+    resolveAdj(cat.garage.topcoatAdj,job.garageTopcoat||'protective','Topcoat ('+(job.garageTopcoat||'protective')+')',pending,adjustments,pkgKey);
     const condKey=job.garageCondition||'unknown';
     noteUnknown(cat.garage.conditionAdj,condKey,pkgKey,pending,notes,'Condition is Unknown / not inspected — do not assume $0. Inspect or set an explicit unknown-condition adjustment in the price book.');
-    const cond=resolveAdj(cat.garage.conditionAdj,condKey,'Concrete condition ('+condKey+')',pending,adjustments,pkgKey);
+    if(condKey!=='critical')resolveAdj(cat.garage.conditionAdj,condKey,'Concrete condition ('+condKey+')',pending,adjustments,pkgKey);
     const prep=job.garagePrep||{};
     for(const [pk,on] of Object.entries(prep)){
-      if(!on)continue;
+      if(!on||pk==='leveling')continue;
       resolveAdj(cat.garage.prepAdj,pk,'Prep: '+pk,pending,adjustments,pkgKey);
     }
     itemCount=1;
@@ -272,7 +284,11 @@ function buildCatalogBreakdown(job,settings){
         pending.push('Starting price needed — enter size/dimensions for '+name+'.');
         startingConfigured=false;
       } else if(!isConfigured(startRaw)){
-        pending.push('Starting price needed — set flatwork starting price'+(band?(' for size band "'+band.label+'"'):'')+' in the price book (or on this item).');
+        if(!band){
+          pending.push('Optional flatwork override is blank and no size band matched for '+name+'. A blank override is not a missing package price. Choose a size band or enter an item override. The item stays Pending.');
+        } else {
+          pending.push('Starting price needed — size band "'+band.label+'" has no configured starting price for '+name+'.');
+        }
         startingConfigured=false;
       } else {
         const start=Number(startRaw);
@@ -283,6 +299,8 @@ function buildCatalogBreakdown(job,settings){
       resolveAdj(cat.flatwork.topcoatAdj,it.topcoat||'protective','Topcoat ('+(it.topcoat||'protective')+') — '+name,pending,adjustments);
       const ck=it.condition||'unknown';
       noteUnknown(cat.flatwork.conditionAdj,ck,'',pending,notes,'Condition is Unknown for '+name+' — do not assume $0. Inspect or configure an explicit adjustment.');
+      if(ck==='critical')pending.push('Critical condition for '+name+' is unresolved. Inspection and an owner override are required.');
+      if((it.style||'')==='custom')pending.push('Custom material for '+name+' is unresolved. Inspection and an owner override are required.');
       resolveAdj(cat.flatwork.conditionAdj,ck,'Condition ('+ck+') — '+name,pending,adjustments);
     }
     startingLabel='Flatwork starting';
@@ -309,6 +327,8 @@ function buildCatalogBreakdown(job,settings){
       resolveAdj(cat.seating.topcoatAdj,it.topcoat||'protective','Topcoat ('+(it.topcoat||'protective')+') — '+name,pending,adjustments);
       const ck=it.condition||'unknown';
       noteUnknown(cat.seating.conditionAdj,ck,'',pending,notes,'Condition is Unknown for '+name+' — do not assume $0. Inspect or configure an explicit adjustment.');
+      if(ck==='critical')pending.push('Critical condition for '+name+' is unresolved. Inspection and an owner override are required.');
+      if((it.style||'')==='custom')pending.push('Custom material for '+name+' is unresolved. Inspection and an owner override are required.');
       resolveAdj(cat.seating.conditionAdj,ck,'Condition ('+ck+') — '+name,pending,adjustments);
     }
     startingLabel='Seating starting';
@@ -318,7 +338,8 @@ function buildCatalogBreakdown(job,settings){
   const allLines=[...lines,...adjustments];
   const scopeTotal=startingTotal+adjTotal;
   const hasNegative=adjustments.some(x=>sn(x.total)<0);
-  if(hasNegative&&scopeTotal<=0)pending.push('Adjustments exceed the starting price');
+  /* Leave the raw scope. A non-positive package is blocked; it is not rewritten into a free quote. */
+  if(hasNegative&&scopeTotal<=0)pending.push('Adjustments exceed the starting price. The package was not rewritten to a free $0 quote.');
   const quoteReady=pending.length===0 && startingConfigured && (itemCount>0||type==='garage');
   return {
     type, pending, notes, lines:allLines, startingLines:lines, adjustments, startingTotal, adjTotal, scopeTotal,
@@ -508,7 +529,7 @@ function calculate(job,settings){
    track('top',sf/p.top.coverage*w);coatPassArea+=sf;topArea+=sf;
    if(style==='sealer'){track('sealer',sf/p.sealer.coverage*w);coatPassArea+=sf;basePassArea+=sf}
    else {if(!areaMoisture){track('primer',sf/p.primer.coverage*w);if(primerPass)basePassArea+=sf}coatPassArea+=sf;const color=String(a.color).toLowerCase();const base=color.includes('white')?'white':'base';const coats=style==='solid'?Math.max(1,n(a.coats)):1;track(base,sf/p[base].coverage*coats*w);coatPassArea+=sf*coats;basePassArea+=sf*coats;
-    /* usage factors: confirm with Double (verified-figures §1 #6) */
+    /* Current flake yield: full 7 sq ft/lb, medium 125, light 250. Flagged for verification; not a confirmed bug and not a market average. */
     if(style==='flake'){track('flake',sf/(a.flake==='full'?7:a.flake==='medium'?125:250)*w);flakeArea+=sf}
     if(style==='metallic'){track('metal',sf/p.metal.coverage*w);track('pigment',sf/p.pigment.coverage*w);coatPassArea+=sf;metallicArea+=sf}
    }

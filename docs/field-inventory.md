@@ -1,0 +1,133 @@
+# Pending field inventory
+
+Live price-book dollars are not copied here. Product prices, cost rates, and margins are omitted. Unconfigured means null, not zero.
+
+| Path | Area | Audience | State | Review | Proposed | Unit |
+| --- | --- | --- | --- | --- | --- | --- |
+| `rates.solid` | floor | selling | configured_amount | preserved_live_selling | — | USD per sq ft |
+| `rates.flake` | floor | selling | configured_amount | preserved_live_selling | — | USD per sq ft |
+| `rates.metallic` | floor | selling | configured_amount | preserved_live_selling | — | USD per sq ft |
+| `rates.sealer` | floor | selling | configured_amount | preserved_do_not_overwrite | — | USD per sq ft |
+| `rates.level` | floor | selling | configured_amount | preserved_do_not_overwrite | — | USD per sq ft |
+| `rates.removal` | floor | selling | configured_amount | preserved_do_not_overwrite | — | USD per sq ft |
+| `rates.patch` | floor | selling | configured_amount | preserved_do_not_overwrite | — | USD per kit |
+| `rates.moisture` | floor | selling | configured_amount | preserved_do_not_overwrite | — | USD per sq ft |
+| `rates.extraCoat` | floor | selling | configured_amount | preserved_do_not_overwrite | — | USD per sq ft |
+| `rates.mediumFlakeExtra` | floor | selling | configured_amount | preserved_do_not_overwrite | — | USD per sq ft |
+| `rates.fullFlakeExtra` | floor | selling | configured_amount | preserved_do_not_overwrite | — | USD per sq ft |
+| `rates.minimumJob` | floor | selling | configured_amount | preserved_do_not_overwrite | — | USD per job |
+| `pricingOptions.opt1.rates.solid` | floor | selling | configured_amount | preserved_do_not_overwrite | — | USD per sq ft |
+| `pricingOptions.opt1.rates.flake` | floor | selling | configured_amount | preserved_do_not_overwrite | — | USD per sq ft |
+| `pricingOptions.opt1.rates.metallic` | floor | selling | configured_amount | preserved_do_not_overwrite | — | USD per sq ft |
+| `pricingOptions.opt2.rates.solid` | floor | selling | configured_amount | preserved_do_not_overwrite | — | USD per sq ft |
+| `pricingOptions.opt2.rates.flake` | floor | selling | configured_amount | preserved_do_not_overwrite | — | USD per sq ft |
+| `pricingOptions.opt2.rates.metallic` | floor | selling | configured_amount | preserved_do_not_overwrite | — | USD per sq ft |
+| `addOn.low` | floor | selling | configured_zero | preserved_do_not_overwrite | — | USD per sq ft |
+| `addOn.high` | floor | selling | configured_zero | preserved_do_not_overwrite | — | USD per sq ft |
+| `catalog.garage.oneCarStarting` | garage | selling | configured_amount | preserved_do_not_overwrite | — | USD per package |
+| `catalog.garage.twoCarStarting` | garage | selling | configured_amount | preserved_do_not_overwrite | — | USD per package |
+| `catalog.garage.threeCarStarting` | garage | selling | configured_amount | preserved_do_not_overwrite | — | USD per package |
+| `catalog.garage.materialAdj.solid.oneCar` | garage | selling | configured_amount | preserved_do_not_overwrite | — | USD per package |
+| `catalog.garage.materialAdj.solid.twoCar` | garage | selling | configured_amount | preserved_do_not_overwrite | — | USD per package |
+| `catalog.garage.materialAdj.solid.threeCar` | garage | selling | configured_amount | preserved_do_not_overwrite | — | USD per package |
+| `catalog.garage.materialAdj.flake` | garage | selling | configured_zero | preserved_do_not_overwrite | — | USD per package |
+| `catalog.garage.materialAdj.metallic` | garage | selling | unconfigured | awaiting_corrected_source | — | USD per package |
+| `catalog.garage.materialAdj.sealer` | garage | selling | unconfigured | awaiting_corrected_source | — | USD per package |
+| `catalog.garage.materialAdj.custom` | garage | selling | unconfigured | awaiting_corrected_source | — | USD per package |
+| `catalog.garage.topcoatAdj.protective` | garage | selling | configured_zero | preserved_do_not_overwrite | — | USD per package |
+| `catalog.garage.topcoatAdj.none` | garage | selling | configured_zero | preserved_do_not_overwrite | — | USD per package |
+| `catalog.garage.topcoatAdj.premium` | garage | selling | unconfigured | awaiting_corrected_source | — | USD per package |
+| `catalog.garage.conditionAdj.unknown` | garage | selling | unconfigured | awaiting_corrected_source | — | USD per package |
+| `catalog.garage.conditionAdj.good` | garage | selling | configured_zero | preserved_do_not_overwrite | — | USD per package |
+| `catalog.garage.conditionAdj.fair` | garage | selling | unconfigured | awaiting_sourced_estimate | — | USD per package |
+| `catalog.garage.conditionAdj.poor` | garage | selling | unconfigured | awaiting_sourced_estimate | — | USD per package |
+| `catalog.garage.conditionAdj.critical` | garage | selling | unconfigured | awaiting_corrected_source | — | USD per package |
+| `catalog.garage.conditionAdj.sound` | garage | selling | configured_zero | preserved_do_not_overwrite | — | USD per package |
+| `catalog.garage.conditionAdj.paint` | garage | selling | unconfigured | awaiting_sourced_estimate | — | USD per package |
+| `catalog.garage.conditionAdj.adhesive` | garage | selling | unconfigured | awaiting_sourced_estimate | — | USD per package |
+| `catalog.garage.prepAdj.cracks` | garage | selling | unconfigured | awaiting_sourced_estimate | — | USD per package |
+| `catalog.garage.prepAdj.spalling` | garage | selling | unconfigured | awaiting_sourced_estimate | — | USD per package |
+| `catalog.garage.prepAdj.coatingRemoval` | garage | selling | unconfigured | awaiting_sourced_estimate | — | USD per package |
+| `catalog.garage.prepAdj.patching` | garage | selling | unconfigured | awaiting_sourced_estimate | — | USD per package |
+| `catalog.garage.prepAdj.leveling` | garage | selling | unconfigured | awaiting_corrected_source | — | USD per package |
+| `catalog.garage.prepAdj.moisture` | garage | selling | unconfigured | awaiting_corrected_source | — | USD per package |
+| `catalog.flatwork.sizeBands.0.starting` | flatwork | selling | unconfigured | awaiting_sourced_estimate | — | USD per item |
+| `catalog.flatwork.sizeBands.1.starting` | flatwork | selling | unconfigured | awaiting_sourced_estimate | — | USD per item |
+| `catalog.flatwork.sizeBands.2.starting` | flatwork | selling | unconfigured | awaiting_sourced_estimate | — | USD per item |
+| `catalog.flatwork.sizeBands.3.starting` | flatwork | selling | unconfigured | awaiting_sourced_estimate | — | USD per item |
+| `catalog.flatwork.customStarting` | flatwork | selling | unconfigured | awaiting_corrected_source | — | USD per item |
+| `catalog.flatwork.materialAdj.solid` | flatwork | selling | unconfigured | awaiting_sourced_estimate | — | USD per item |
+| `catalog.flatwork.materialAdj.flake` | flatwork | selling | unconfigured | awaiting_sourced_estimate | — | USD per item |
+| `catalog.flatwork.materialAdj.metallic` | flatwork | selling | unconfigured | awaiting_sourced_estimate | — | USD per item |
+| `catalog.flatwork.materialAdj.sealer` | flatwork | selling | unconfigured | awaiting_corrected_source | — | USD per item |
+| `catalog.flatwork.materialAdj.custom` | flatwork | selling | unconfigured | awaiting_corrected_source | — | USD per item |
+| `catalog.flatwork.topcoatAdj.protective` | flatwork | selling | configured_zero | preserved_do_not_overwrite | — | USD per item |
+| `catalog.flatwork.topcoatAdj.none` | flatwork | selling | configured_zero | preserved_do_not_overwrite | — | USD per item |
+| `catalog.flatwork.topcoatAdj.premium` | flatwork | selling | unconfigured | awaiting_sourced_estimate | — | USD per item |
+| `catalog.flatwork.conditionAdj.unknown` | flatwork | selling | unconfigured | awaiting_corrected_source | — | USD per item |
+| `catalog.flatwork.conditionAdj.good` | flatwork | selling | configured_zero | preserved_do_not_overwrite | — | USD per item |
+| `catalog.flatwork.conditionAdj.fair` | flatwork | selling | unconfigured | awaiting_sourced_estimate | — | USD per item |
+| `catalog.flatwork.conditionAdj.poor` | flatwork | selling | unconfigured | awaiting_sourced_estimate | — | USD per item |
+| `catalog.flatwork.conditionAdj.critical` | flatwork | selling | unconfigured | awaiting_corrected_source | — | USD per item |
+| `catalog.seating.byType.chair` | seating | selling | unconfigured | awaiting_sourced_estimate | — | USD per item |
+| `catalog.seating.byType.stool` | seating | selling | unconfigured | awaiting_sourced_estimate | — | USD per item |
+| `catalog.seating.byType.other` | seating | selling | unconfigured | awaiting_sourced_estimate | — | USD per item |
+| `catalog.seating.materialAdj.solid` | seating | selling | unconfigured | awaiting_sourced_estimate | — | USD per item |
+| `catalog.seating.materialAdj.flake` | seating | selling | unconfigured | awaiting_sourced_estimate | — | USD per item |
+| `catalog.seating.materialAdj.metallic` | seating | selling | unconfigured | awaiting_sourced_estimate | — | USD per item |
+| `catalog.seating.materialAdj.sealer` | seating | selling | unconfigured | awaiting_corrected_source | — | USD per item |
+| `catalog.seating.materialAdj.custom` | seating | selling | unconfigured | awaiting_corrected_source | — | USD per item |
+| `catalog.seating.topcoatAdj.protective` | seating | selling | configured_zero | preserved_do_not_overwrite | — | USD per item |
+| `catalog.seating.topcoatAdj.none` | seating | selling | configured_zero | preserved_do_not_overwrite | — | USD per item |
+| `catalog.seating.topcoatAdj.premium` | seating | selling | unconfigured | awaiting_sourced_estimate | — | USD per item |
+| `catalog.seating.conditionAdj.unknown` | seating | selling | unconfigured | awaiting_corrected_source | — | USD per item |
+| `catalog.seating.conditionAdj.good` | seating | selling | configured_zero | preserved_do_not_overwrite | — | USD per item |
+| `catalog.seating.conditionAdj.fair` | seating | selling | unconfigured | awaiting_sourced_estimate | — | USD per item |
+| `catalog.seating.conditionAdj.poor` | seating | selling | unconfigured | awaiting_sourced_estimate | — | USD per item |
+| `catalog.seating.conditionAdj.critical` | seating | selling | unconfigured | awaiting_corrected_source | — | USD per item |
+| `products.primer.price` | products | product | configured_amount | owner_book_not_copied | — | USD package price (owner) |
+| `products.base.price` | products | product | configured_amount | owner_book_not_copied | — | USD package price (owner) |
+| `products.white.price` | products | product | configured_amount | owner_book_not_copied | — | USD package price (owner) |
+| `products.metal.price` | products | product | configured_amount | owner_book_not_copied | — | USD package price (owner) |
+| `products.pigment.price` | products | product | configured_amount | owner_book_not_copied | — | USD package price (owner) |
+| `products.sealer.price` | products | product | configured_amount | owner_book_not_copied | — | USD package price (owner) |
+| `products.top.price` | products | product | configured_amount | owner_book_not_copied | — | USD package price (owner) |
+| `products.flake.price` | products | product | configured_amount | owner_book_not_copied | — | USD package price (owner) |
+| `products.level.price` | products | product | configured_amount | owner_book_not_copied | — | USD package price (owner) |
+| `products.levelPrimer.price` | products | product | configured_amount | owner_book_not_copied | — | USD package price (owner) |
+| `products.patch.price` | products | product | configured_amount | owner_book_not_copied | — | USD package price (owner) |
+| `products.grip.price` | products | product | configured_amount | owner_book_not_copied | — | USD package price (owner) |
+| `products.moisture.price` | products | product | configured_amount | owner_book_not_copied | — | USD package price (owner) |
+| `costs.waste` | costs | cost | configured_amount | owner_book_not_copied | — | percent |
+| `costs.labor` | costs | cost | configured_amount | owner_book_not_copied | — | USD per person-hour |
+| `costs.prepProduction` | costs | cost | configured_amount | owner_book_not_copied | — | sq ft per person-hour |
+| `costs.coatProduction` | costs | cost | configured_amount | owner_book_not_copied | — | sq ft per person-hour |
+| `costs.levelProduction` | costs | cost | configured_amount | owner_book_not_copied | — | sq ft per person-hour |
+| `costs.removalProduction` | costs | cost | configured_amount | owner_book_not_copied | — | sq ft per person-hour |
+| `costs.patchHours` | costs | cost | configured_amount | owner_book_not_copied | — | hours |
+| `costs.setupHours` | costs | cost | configured_amount | owner_book_not_copied | — | hours |
+| `costs.rentalDay` | costs | cost | configured_amount | owner_book_not_copied | — | USD per day |
+| `costs.tooling` | costs | cost | configured_amount | owner_book_not_copied | — | USD allowance |
+| `costs.supplies` | costs | cost | configured_amount | owner_book_not_copied | — | USD allowance |
+| `costs.dust` | costs | cost | configured_amount | owner_book_not_copied | — | USD allowance |
+| `costs.disposal` | costs | cost | configured_amount | owner_book_not_copied | — | USD allowance |
+| `costs.mile` | costs | cost | configured_amount | owner_book_not_copied | — | USD per mile |
+| `costs.overhead` | costs | cost | configured_zero | owner_book_not_copied | — | USD per job |
+| `costs.contingency` | costs | cost | configured_amount | owner_book_not_copied | — | percent |
+| `costs.purchaseTax` | costs | cost | configured_amount | owner_book_not_copied | — | percent |
+| `costs.markup` | costs | cost | configured_amount | owner_book_not_copied | — | percent |
+| `costs.targetMargin` | costs | cost | configured_amount | owner_book_not_copied | — | percent |
+| `costs.minMargin` | costs | cost | configured_amount | owner_book_not_copied | — | percent |
+| `costs.minimum` | costs | cost | configured_zero | owner_book_not_copied | — | USD per job |
+| `costs.grindProduction` | costs | cost | configured_amount | owner_book_not_copied | — | sq ft per person-hour |
+| `costs.baseProduction` | costs | cost | configured_amount | owner_book_not_copied | — | sq ft per person-hour |
+| `costs.flakeProduction` | costs | cost | configured_amount | owner_book_not_copied | — | sq ft per person-hour |
+| `costs.topProduction` | costs | cost | configured_amount | owner_book_not_copied | — | sq ft per person-hour |
+| `costs.metallicProduction` | costs | cost | configured_amount | owner_book_not_copied | — | sq ft per person-hour |
+| `costs.billableHoursPerMonth` | costs | cost | configured_amount | owner_book_not_copied | — | hours per month |
+
+Approved regular selling rates already on this build (not proposed, not owner costs): solid 7, flake 10, metallic 15 USD per sq ft.
+
+A null selling field stays null. It is not zero, and this draft does not fill it from a sourced average. Corrected sourced estimates are not in this pull request.
+
+Pending price paths: 17. Sourced rows loaded: 0. Structural nulls excluded from that count: catalog.flatwork.sizeBands.3.maxSqft.

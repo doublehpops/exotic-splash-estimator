@@ -1,0 +1,200 @@
+{
+  "schema": "exotic-splash.owner-pricing.v1",
+  "live": "Do not treat epoxy-engine defaults as a license to write owner costs. This file lists fields and units only. It does not contain prices, costs, or margins.",
+  "books": {
+    "staff_settings": "selling rates, catalog starts and adjustments, approvedAdjustment, business, notes. Employees can read this book.",
+    "owner_settings": "products and costs only. Employees receive zeros, not this object."
+  },
+  "overwrite_rule": "If a live value is a finite number, including 0, do not replace it. Fill only null or missing leaves, and only after review.",
+  "product_record": {
+    "path": "owner_settings.products.<key>",
+    "fields": [
+      "label",
+      "size",
+      "price",
+      "coverage",
+      "unit"
+    ],
+    "price_unit": "USD per package",
+    "keys": [
+      "primer",
+      "base",
+      "white",
+      "metal",
+      "pigment",
+      "sealer",
+      "top",
+      "flake",
+      "level",
+      "levelPrimer",
+      "patch",
+      "grip",
+      "moisture"
+    ]
+  },
+  "cost_record": {
+    "path": "owner_settings.costs.<key>",
+    "keys": [
+      {
+        "key": "waste",
+        "unit": "percent"
+      },
+      {
+        "key": "labor",
+        "unit": "USD per person-hour"
+      },
+      {
+        "key": "prepProduction",
+        "unit": "sq ft per person-hour"
+      },
+      {
+        "key": "coatProduction",
+        "unit": "sq ft per person-hour"
+      },
+      {
+        "key": "levelProduction",
+        "unit": "sq ft per person-hour"
+      },
+      {
+        "key": "removalProduction",
+        "unit": "sq ft per person-hour"
+      },
+      {
+        "key": "patchHours",
+        "unit": "hours"
+      },
+      {
+        "key": "setupHours",
+        "unit": "hours"
+      },
+      {
+        "key": "rentalDay",
+        "unit": "USD per day"
+      },
+      {
+        "key": "tooling",
+        "unit": "USD allowance"
+      },
+      {
+        "key": "supplies",
+        "unit": "USD allowance"
+      },
+      {
+        "key": "dust",
+        "unit": "USD allowance"
+      },
+      {
+        "key": "disposal",
+        "unit": "USD allowance"
+      },
+      {
+        "key": "mile",
+        "unit": "USD per mile"
+      },
+      {
+        "key": "overhead",
+        "unit": "USD per job"
+      },
+      {
+        "key": "contingency",
+        "unit": "percent"
+      },
+      {
+        "key": "purchaseTax",
+        "unit": "percent"
+      },
+      {
+        "key": "markup",
+        "unit": "percent"
+      },
+      {
+        "key": "targetMargin",
+        "unit": "percent"
+      },
+      {
+        "key": "minMargin",
+        "unit": "percent"
+      },
+      {
+        "key": "minimum",
+        "unit": "USD per job"
+      },
+      {
+        "key": "grindProduction",
+        "unit": "sq ft per person-hour"
+      },
+      {
+        "key": "baseProduction",
+        "unit": "sq ft per person-hour"
+      },
+      {
+        "key": "flakeProduction",
+        "unit": "sq ft per person-hour"
+      },
+      {
+        "key": "topProduction",
+        "unit": "sq ft per person-hour"
+      },
+      {
+        "key": "metallicProduction",
+        "unit": "sq ft per person-hour"
+      },
+      {
+        "key": "billableHoursPerMonth",
+        "unit": "hours per month"
+      }
+    ]
+  },
+  "omitted_from_this_draft": [
+    "material costbook v8",
+    "whole-pack billing",
+    "owner cost amounts",
+    "margin amounts"
+  ],
+  "size_review": [
+    {
+      "key": "primer",
+      "note": "Do not copy a unit cost until size, price, and coverage describe the same kit.",
+      "apply": false
+    },
+    {
+      "key": "flake",
+      "note": "The engine package is 40 lb. Do not apply an archive unit cost from this draft.",
+      "apply": false
+    },
+    {
+      "key": "grip",
+      "note": "Traction pack was not matched to a catalog row.",
+      "apply": false
+    },
+    {
+      "key": "base",
+      "note": "Pigment is a separate row. Do not treat one kit cost as the full colored system.",
+      "apply": false
+    }
+  ],
+  "garage_adjustment_rule": "Garage base fee is the selected tier flake rate times that package typical size. Solid credits stay per package. A single flat sealer or custom delta is not applied to a package. Critical condition and package leveling stay unfinished until inspection. Package reference dollars and per-sq-ft caps are left as already configured.",
+  "pending_selling_paths": [
+    "catalog.garage.prepAdj.leveling",
+    "catalog.garage.prepAdj.moisture",
+    "catalog.garage.topcoatAdj.premium",
+    "catalog.garage.materialAdj.custom",
+    "catalog.garage.materialAdj.sealer",
+    "catalog.garage.materialAdj.metallic",
+    "catalog.garage.conditionAdj.unknown",
+    "catalog.garage.conditionAdj.critical",
+    "catalog.seating.materialAdj.custom",
+    "catalog.seating.materialAdj.sealer",
+    "catalog.seating.conditionAdj.unknown",
+    "catalog.seating.conditionAdj.critical",
+    "catalog.flatwork.materialAdj.custom",
+    "catalog.flatwork.materialAdj.sealer",
+    "catalog.flatwork.conditionAdj.unknown",
+    "catalog.flatwork.conditionAdj.critical",
+    "catalog.flatwork.customStarting"
+  ],
+  "structural_nulls": [
+    "catalog.flatwork.sizeBands.3.maxSqft"
+  ],
+  "sourced_rows_loaded": 0
+}
