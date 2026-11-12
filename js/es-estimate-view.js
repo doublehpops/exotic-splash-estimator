@@ -6,6 +6,17 @@ const cash=n=>(Number(n)||0).toLocaleString('en-US',{style:'currency',currency:'
 const num=(n,d=0)=>(Number(n)||0).toLocaleString('en-US',{maximumFractionDigits:d,minimumFractionDigits:d});
 function fmtDate(s){if(!s)return '';const d=new Date(s);return isNaN(d)?esc(s):d.toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'})}
 function lineRows(lines){return (lines||[]).map(l=>`<tr><td>${esc(l.label)}${l.description?`<small>${esc(l.description)}</small>`:''}</td><td class="num">${l.qty?num(l.qty,2)+' '+esc(l.unit||''):''}</td><td class="num">${l.pending?'Pending':cash(l.total)}</td></tr>`).join('')}
+const PROJECT_TYPE={floor:'Measured floor',garage:'Garage',flatwork:'Tables / counters / bars',seating:'Chairs / stools'};
+function projectTypeLabel(type){return PROJECT_TYPE[type]||'Project'}
+/** One pricing row per project on a multi-project quote: label, type, and that project's subtotal. */
+function projectPriceRows(sections){
+  return (sections||[]).map(s=>{
+    const name=esc(s.label||'Project');
+    const type=esc(projectTypeLabel(s.type));
+    const amount=s.quoteReady===false?'Pending':cash(s.subtotal);
+    return `<tr><td>${name}<small>${type}</small></td><td class="num"></td><td class="num">${amount}</td></tr>`;
+  }).join('');
+}
 /** Acceptance block for a ready estimate: the accepted banner, or the accept form. */
 function acceptanceHTML(docName,ready,acceptance){
   if(!ready)return '';
@@ -27,7 +38,8 @@ function render(payload,acceptance){
   const e=payload.estimate,b=e.business||{},c=e.customer||{},d=e.document||{},t=e.totals||{},sel=e.selected||{};
   const ready=!!e.quoteReady;
   const docName=d.type==='invoice'?'Invoice':'Estimate';
-  const rows=e.project&&e.project.catalog?lineRows(e.catalogStarting)+lineRows(e.catalogAdjustments):lineRows(e.lines);
+  const multi=(e.sections||[]).length>1;
+  const rows=multi?projectPriceRows(e.sections):(e.project&&e.project.catalog?lineRows(e.catalogStarting)+lineRows(e.catalogAdjustments):lineRows(e.lines));
   const scope=(e.scope||[]).map(a=>`<li><b>${esc(a.name)}</b> — ${num(a.sqft)} sq ft · ${esc(a.description)}${a.color?' · color: '+esc(a.color):''}${a.flakeBlend?' · flake: '+esc(a.flakeBlend):''}${a.moisture?' · moisture-control primer':''}</li>`).join('');
   const projects=(e.sections||[]).length>1?(e.sections||[]).map(s=>`<li><b>${esc(s.label||'Project')}</b> — ${esc(s.address||'')} — ${s.quoteReady===false?'Pending':cash(s.subtotal)}</li>`).join(''):'';
   const pays=(sel.payments||[]).map(p=>`<tr><td>${esc(p.label)} (${num(p.pct)}%)</td><td class="num">${cash(p.amount)}</td></tr>`).join('');

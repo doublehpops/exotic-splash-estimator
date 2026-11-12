@@ -1403,8 +1403,8 @@ function stepReview(j){
   ${x.quoteReady||(x.blockingIssues||[]).length?'':`<div class="warn-banner"><b>Finalized quote blocked</b> until required starting prices and adjustments are configured. Do not present Pending as a $0 customer total.</div>`}
   ${metrics}
   ${ownerViewHTML()}
-  <div class="inline-actions"><button type="button" class="button" id="saveAsIssued" ${(x.blockingIssues||[]).length||((x.sanity&&x.sanity.warnings||[]).length&&!ownerAcked(j,x.sanity.warnings))?'disabled':''}>Save as issued</button></div>
-  ${(x.blockingIssues||[]).length?'<p class="method-note">Save as issued, issuing, and customer links stay off until the price is fixed. The draft still saves and is marked needs fixing.</p>':''}
+  ${owner?`<div class="inline-actions"><button type="button" class="button" id="saveAsIssued" ${(x.blockingIssues||[]).length||((x.sanity&&x.sanity.warnings||[]).length&&!ownerAcked(j,x.sanity.warnings))?'disabled':''}>Save as issued</button></div>`:''}
+  ${(x.blockingIssues||[]).length?(owner?'<p class="method-note">Save as issued, issuing, and customer links stay off until the price is fixed. The draft still saves and is marked needs fixing.</p>':'<p class="method-note">Issuing and customer links stay off until the price is fixed. The draft still saves and is marked needs fixing.</p>'):''}
   ${quoteAllocationHTML(x)}
   <div class="info-banner"><b>Approved adjustment limit:</b> ${approvedAdjustmentLabel()} · applied ${cash(E.n(j.discount))}.</div>
   <div class="export-grid">
@@ -1607,7 +1607,7 @@ function baselineSheetHTML(j,s,owner,print){
       ['3-car starting',cat.garage.threeCarStarting]
     ]));
     serviceBlocks+=`<h4 style="margin:12px 0 6px;font-size:13px">Material adjustments</h4>`+tableHTML(['Adjustment','Baseline'],baselineAdjRows(cat.garage.materialAdj,{solid:'Solid',flake:'Flake',metallic:'Metallic',sealer:'Sealer',custom:'Custom'}));
-    serviceBlocks+=`<h4 style="margin:12px 0 6px;font-size:13px">Topcoat adjustments</h4>`+tableHTML(['Adjustment','Baseline'],baselineAdjRows(cat.garage.topcoatAdj,{protective:'Protective',none:'None',premium:'Polyaspartic topcoat'}));
+    serviceBlocks+=`<h4 style="margin:12px 0 6px;font-size:13px">Topcoat adjustments</h4>`+tableHTML(['Adjustment','Baseline'],baselineAdjRows(cat.garage.topcoatAdj,{protective:'Protective',none:'None',premium:'Polyaspartic topcoat ($/sq ft)'}));
     serviceBlocks+=`<h4 style="margin:12px 0 6px;font-size:13px">Condition adjustments</h4>`+tableHTML(['Adjustment','Baseline'],baselineAdjRows(cat.garage.conditionAdj,{unknown:'Unknown',good:'Good',sound:'Sound',fair:'Fair',poor:'Poor',critical:'Critical',paint:'Paint / coating',adhesive:'Adhesive'}));
     serviceBlocks+=`<h4 style="margin:12px 0 6px;font-size:13px">Prep adjustments</h4>`+tableHTML(['Adjustment','Baseline'],baselineAdjRows(cat.garage.prepAdj,{cracks:'Cracks / joints',spalling:'Spalling',coatingRemoval:'Coating removal',patching:'Patching',leveling:'Leveling',moisture:'Moisture-control primer'}));
     if(!E.garageUsesMeasured(j)){
@@ -2720,7 +2720,7 @@ document.addEventListener('click',e=>{
       job.sanityAck={role:'owner',fingerprint:warnFingerprint((priced.sanity&&priced.sanity.warnings)||[]),at:nowISO()};
       save();render();toast('Confirmed. You can issue or share this quote.');break;}
     case'ackPerSqft':if(!isOwner()){toast('Only the owner can confirm a rate.');break;}ackPerSqft();render();break;
-    case'saveAsIssued':save({issue:true});render();break;
+    case'saveAsIssued':if(!isOwner()){toast('Only the owner can change job status.');break}save({issue:true});render();break;
     case'requestExtraDiscount':requestExtraDiscount();break;
     case'approveExtraDiscount':decideExtraDiscount('approve');break;
     case'rejectExtraDiscount':decideExtraDiscount('reject');break;

@@ -121,6 +121,86 @@ check('garage at home plus a bar at a second address keeps both locations',()=>{
   assert.ok(html.includes('Bar'));
   assert.ok(!/"cost"/.test(JSON.stringify(snap)));
   assert.ok(!html.includes('price not set'));
+  const pricing=html.slice(html.indexOf('<h2>Pricing</h2>'),html.indexOf('<table class="est-totals">'));
+  assert.ok(!pricing.includes('See total'));
+  assert.ok(pricing.includes('Home garage<small>Garage</small>'));
+  assert.ok(pricing.includes('Bar<small>Tables / counters / bars</small>'));
+  assert.ok(pricing.includes('$5,500.00'));
+  assert.ok(pricing.includes('$2,200.00'));
+  assert.ok(!pricing.includes('—'));
+  assert.ok(!pricing.includes(';'));
+  assert.ok(html.includes('<td>Subtotal</td>'));
+  assert.ok(html.includes('Total'));
+});
+
+check('a single-project customer estimate keeps its own pricing rows',()=>{
+  const book=pricedBook();
+  const garage=garageHome();
+  delete garage.sections;
+  const gx=E.calculate(garage,E.defaults);
+  const ghtml=V.render({estimate:Q.customerSnapshot(E,garage,gx,E.defaults)});
+  const gp=ghtml.slice(ghtml.indexOf('<h2>Pricing</h2>'),ghtml.indexOf('<table class="est-totals">'));
+  assert.ok(gp.includes('1.00 package'));
+  assert.ok(gp.includes('$5,500.00'));
+  assert.ok(!gp.includes('See total'));
+  assert.ok(!gp.includes('<small>Garage</small>'));
+  const floor=floorJob(200,'flake');
+  const fx=E.calculate(floor,E.defaults);
+  const fhtml=V.render({estimate:Q.customerSnapshot(E,floor,fx,E.defaults)});
+  const fp=fhtml.slice(fhtml.indexOf('<h2>Pricing</h2>'),fhtml.indexOf('<table class="est-totals">'));
+  assert.ok(fp.includes('1.00 sq ft')||fp.includes('sq ft'));
+  assert.ok(!fp.includes('<small>Measured floor</small>'));
+  assert.ok(!fp.includes('See total'));
+  const table=E.newJob();
+  Object.assign(table,{customer:'Pat',projectType:'flatwork',tax:0,miles:0,minutes:0,priceOption:'regular'});
+  table.catalogItems=[Object.assign(E.newFlatItem(),{name:'Dining table',kind:'table',length:2,width:2,condition:'good'})];
+  const tx=E.calculate(table,book);
+  const thtml=V.render({estimate:Q.customerSnapshot(E,table,tx,book)});
+  assert.ok(!thtml.slice(thtml.indexOf('<h2>Pricing</h2>'),thtml.indexOf('<table class="est-totals">')).includes('<small>Tables / counters / bars</small>'));
+});
+
+check('a floor quote with a second room lists each project in the pricing table',()=>{
+  const j=floorJob(200,'flake');
+  j.sectionLabel='Shop floor';
+  const office=E.newSection('floor');
+  office.label='Office';
+  office.areas[0].sqft=80;office.areas[0].style='solid';office.areas[0].coats=1;
+  j.sections=[office];
+  const snap=Q.customerSnapshot(E,j,E.calculate(j,E.defaults),E.defaults);
+  const html=V.render({estimate:snap});
+  const pricing=html.slice(html.indexOf('<h2>Pricing</h2>'),html.indexOf('<table class="est-totals">'));
+  assert.ok(pricing.includes('Shop floor<small>Measured floor</small>'));
+  assert.ok(pricing.includes('Office<small>Measured floor</small>'));
+  assert.ok(pricing.includes('$2,000.00'));
+  assert.ok(pricing.includes('$2,750.00'));
+  assert.ok(!pricing.includes('See total'));
+  assert.ok(!pricing.includes('1.00 project'));
+  assert.ok(html.includes('<td>Subtotal</td>'));
+});
+
+check('a pending project row says Pending and does not use See total',()=>{
+  const html=V.render({estimate:{
+    business:{name:'Exotic Splash',address:'',phone:''},
+    document:{type:'estimate',number:'ES-1',date:''},
+    customer:{name:'Pat',address:'10 Home Lane'},
+    project:{catalog:true,type:'garage'},
+    lines:[],catalogStarting:[],catalogAdjustments:[],scope:[],prepNotes:[],
+    sections:[
+      {label:'Home garage',type:'garage',address:'10 Home Lane',subtotal:5500,quoteReady:true},
+      {label:'Bar',type:'flatwork',address:'200 Bar St',subtotal:0,quoteReady:false}
+    ],
+    totals:{subtotal:5500,total:5500},
+    selected:{key:'regular',label:'Regular price',payments:[]},
+    quoteReady:false,pendingReasons:['Starting price needed']
+  }});
+  const pricing=html.slice(html.indexOf('<h2>Pricing</h2>'),html.indexOf('<table class="est-totals">'));
+  assert.ok(pricing.includes('Home garage<small>Garage</small>'));
+  assert.ok(pricing.includes('$5,500.00'));
+  assert.ok(pricing.includes('Bar<small>Tables / counters / bars</small>'));
+  assert.ok(pricing.includes('Pending'));
+  assert.ok(!pricing.includes('See total'));
+  assert.ok(!pricing.includes('—'));
+  assert.ok(!pricing.includes(';'));
 });
 
 check('the $2,000 minimum is applied once to the whole quote',()=>{
