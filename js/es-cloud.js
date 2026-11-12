@@ -160,7 +160,11 @@ function create(client,opts){
     async listAcceptances(){return unwrap(await client.rpc('staff_list_estimate_acceptances'))||[]},
     async listFollowups(){return unwrap(await client.rpc('list_followups'))||{rows:[]}},
     async followupAction(id,action,when){return unwrap(await client.rpc('followup_owner_action',{p_id:id,p_action:action,p_when:when||null}))},
-    async setFollowupSettings(enabled,dryRun,voiceEnabled){return unwrap(await client.rpc('owner_set_followup_settings',{p_enabled:!!enabled,p_dry_run:dryRun!==false,p_voice_enabled:!!voiceEnabled}))},
+    async setFollowupSettings(enabled,dryRun,voiceEnabled,steps){
+      const args={p_enabled:!!enabled,p_dry_run:dryRun!==false,p_voice_enabled:!!voiceEnabled};
+      if(steps)args.p_steps=steps;
+      return unwrap(await client.rpc('owner_set_followup_settings',args));
+    },
     async getFollowupSurvey(token){return unwrap(await client.rpc('get_followup_survey',{p_token:token}))},
     async submitFollowupSurvey(token,answers){return unwrap(await client.rpc('submit_followup_survey',{p_token:token,p_answers:answers}))},
     /* ---------- job photos: private Storage bucket, path <job uuid>/<photo id>.jpg ---------- */

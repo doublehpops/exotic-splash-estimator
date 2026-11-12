@@ -171,6 +171,11 @@ function guidedJob(base){
   j.includeGuideWithEstimate=j.includeGuideWithEstimate!==false; // default ON for customer package
   j.followupConsent=raw.followupConsent===true;
   j.quoteDecision=['booked','declined','undecided'].includes(raw.quoteDecision)?raw.quoteDecision:'';
+  j.visitDate=/^\d{4}-\d{2}-\d{2}$/.test(String(raw.visitDate||''))?String(raw.visitDate):'';
+  j.visitTime=/^\d{2}:\d{2}$/.test(String(raw.visitTime||''))?String(raw.visitTime):'';
+  j.visitAddress=String(raw.visitAddress||'').trim().slice(0,200);
+  j.installDate=/^\d{4}-\d{2}-\d{2}$/.test(String(raw.installDate||''))?String(raw.installDate):'';
+  if(Number(raw.customerQuoteTotal)>0)j.customerQuoteTotal=Math.round(Number(raw.customerQuoteTotal)*100)/100;
   j.isSample=!!j.isSample;
   j.sampleLabel=j.sampleLabel||'';
   j.crew=E.crewSize(j);
@@ -358,7 +363,12 @@ function ackPerSqft(){
 }
 function save(opts){
   const j=activeJob();
-  if(j){j.updatedAt=nowISO();syncPrepIntoEngineFields(j)}
+  if(j){
+    j.updatedAt=nowISO();syncPrepIntoEngineFields(j);
+    const price=customerPrice(j);
+    if(price.ready&&Number(price.total)>0)j.customerQuoteTotal=Math.round(Number(price.total)*100)/100;
+    else delete j.customerQuoteTotal;
+  }
   if(j&&opts&&opts.issue){
     const gate=issueGate(j);
     if(!gate.ok){
@@ -988,6 +998,8 @@ function stepContact(j){
   ${checkbox('OK to text me about this quote','job.followupConsent')}
   <p class="method-note">Leave this off unless the customer agreed to a text. The lead form does not record that agreement, so it starts unchecked.</p>
   ${select('Quote result','job.quoteDecision',[['','Not marked yet'],['booked','Booked'],['declined','Declined'],['undecided','Undecided']])}
+  <div class="fields">${field('Estimate visit date','job.visitDate','date','Optional. The day of the free on-site estimate.')}${field('Estimate visit time','job.visitTime','time','Optional. Chicago time.')}
+  ${field('Visit address','job.visitAddress','text','Optional. Blank uses the job address.')}${field('Install date','job.installDate','date','Optional. Set this when the job is booked.')}</div>
   ${contactSufficient(j)?`<div class="info-banner">This job is saved${authMode()?' to your account':''} for <b>${escape(j.customer||j.company||'this lead')}</b>.</div>`
     :`<div class="empty-state"><h3>Start with the customer</h3><p>Enter a name and at least one of phone, email, or job address. A server job is not created until then.</p></div>`}
   <div class="palette-block"><span class="eyebrow">PROJECT TYPE</span>

@@ -140,6 +140,14 @@ Deno.serve(async (req: Request) => {
     }
   }
   if (why && !row.outcome_reason) patch.outcome_reason = why.slice(0, 1000);
+  const yes = !opted && messages.some((m) => F.isYesConfirm(m.body));
+  if (yes) {
+    patch.visit_confirmed_at = new Date().toISOString();
+    await admin.from("job_followups").update({
+      visit_confirmed_at: patch.visit_confirmed_at,
+      updated_at: patch.updated_at,
+    }).eq("job_id", row.job_id);
+  }
   if (opted) {
     patch.status = "opted_out";
     patch.opted_out_at = local.optedOutAt || new Date().toISOString();
