@@ -253,8 +253,10 @@ check('thank-you text has the survey link and no prices',()=>{
   assert.ok(booked.includes('Thanks for having us out to look at your metallic 2-car garage floor.'));
   assert.ok(booked.includes("Thanks for choosing us. We'll reach out to confirm next steps."));
   assert.ok(booked.includes(url));
-  assert.ok(booked.includes('- Ashley, Exotic Splash'));
+  assert.ok(booked.includes('- Exotic Splash Epoxy LLC'));
+  assert.ok(booked.includes('\n- Exotic Splash Epoxy LLC\nReply STOP to opt out.'));
   assert.ok(booked.endsWith('Reply STOP to opt out.'));
+  assert.ok(!/ashley/i.test(booked));
   assert.ok(!/\$/.test(booked));
   const declined=F.followupSms({firstName:'',outcome:'declined',projectSummary:'flake floor',surveyUrl:url});
   assert.ok(declined.includes('If something held you back, just reply and let us know. We read every reply.'));
@@ -342,12 +344,13 @@ check('a survey token can be used once and the page has no prices',()=>{
   const record={tokenHash:F.sha256Hex(raw),usedAt:null,answers:null,token:raw};
   const opened=F.openSurvey(record,raw);
   assert.strictEqual(opened.ok,true);
-  assert.ok(opened.questions.some(q=>q.id==='why_not'));
+  assert.ok(opened.questions.some(q=>q.id==='likely'));
+  assert.ok(opened.questions.some(q=>q.prompt==='Did your estimator show up on time?'));
   assert.ok(!JSON.stringify(opened).includes('$'));
-  assert.ok(!JSON.stringify(opened).match(/cost|margin|price/i));
+  assert.ok(!JSON.stringify(opened).match(/\bcost\b|\bmargin\b|\bmarkup\b/i));
   const bad=F.consumeSurvey(record,raw,{on_time:'yes'});
   assert.strictEqual(bad.ok,false);
-  const answers={on_time:'yes',professional:'yes',explained:'yes',experience:4,improve:'Arrive with booties',booked:'no',why_not:'We are waiting on the budget'};
+  const answers={on_time:'yes',explained:4,professional:5,likely:'maybe',improve:'Arrive with booties'};
   const saved=F.consumeSurvey(record,raw,answers);
   assert.strictEqual(saved.ok,true);
   assert.strictEqual(record.token,null);
@@ -388,8 +391,10 @@ check('employees see status only and the owner sees text actions',()=>{
   assert.ok(owner.includes('A2P 10DLC'));
   assert.ok(owner.includes('Follow-ups enabled')&&!owner.includes('checked> Follow-ups enabled')||owner.includes('id="fuEnabled"'));
   const form=UI.surveyForm(F.SURVEY_QUESTIONS);
-  assert.ok(form.includes('Did you book with us?'));
+  assert.ok(form.includes('How likely are you to book with us?'));
+  assert.ok(form.includes('Did your estimator show up on time?'));
   assert.ok(!/\$/.test(form));
+  assert.ok(!UI.renderPanel({owner:true,rows:[],settings:{}}).includes('Ashley'));
 });
 
 check('migrations are newer than 20261112183000 and contain no secrets',()=>{

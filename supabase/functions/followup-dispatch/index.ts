@@ -49,7 +49,7 @@ Deno.serve(async (req: Request) => {
     .eq("status", "sending").is("provider_ref", null).lt("updated_at", staleBefore);
 
   const due = await admin.from("job_followups")
-    .select("id,job_id,status,channel,job_outcome,scheduled_for,attempt_count,max_attempts,consent,opted_out_at,phone_e164,project_summary,customer_first_name,survey_token,provider_ref,sms_body")
+    .select("id,job_id,status,channel,job_outcome,scheduled_for,attempt_count,max_attempts,consent,opted_out_at,phone_e164,project_summary,customer_first_name,survey_token,provider_ref,sms_body,step,step_vars")
     .in("status", ["scheduled", "failed"])
     .lte("scheduled_for", new Date().toISOString())
     .limit(25);
@@ -70,6 +70,11 @@ Deno.serve(async (req: Request) => {
   const counts: Record<string, number> = {};
 
   for (const raw of due.data || []) {
+    const step = String(raw.step || "");
+    if (F.isSequenceStep(step) && !flags.steps[step]) {
+      counts.step_disabled = (counts.step_disabled || 0) + 1;
+      continue;
+    }
     const claimRes = await admin.rpc("service_claim_followup_send", { p_id: raw.id });
     const claim = claimRes.data as { ok?: boolean; reason?: string; attempt?: number; idempotencyKey?: string } | null;
     if (claimRes.error || !claim || claim.ok !== true) {
@@ -93,7 +98,30 @@ Deno.serve(async (req: Request) => {
       idempotencyKey: claim.idempotencyKey,
       smsBody: "",
     };
-    row.smsBody = F.followupSms(row);
+    const vars = (raw.step_vars && typeof raw.step_vars === "object") ? raw.step_vars as Record<string, unknown> : {};
+    if (F.isSequenceStep(step)) {
+      const built = F.sequenceSms(step, {
+        firstName: row.firstName,
+        projectSummary: row.projectSummary,
+        quoteTotal: vars.quoteTotal,
+        visitAt: vars.visitAt,
+        address: vars.address,
+        installDate: vars.installDate,
+        surveyUrl: survey,
+        includeStop: vars.includeStop === true,
+        outcome: row.outcome,
+      });
+      if (!built.ok) {
+        await admin.from("job_followups").update({
+          status: "skipped", last_error: built.reason || "missing", updated_at: new Date().toISOString(),
+        }).eq("id", raw.id).eq("status", "sending");
+        counts.skipped = (counts.skipped || 0) + 1;
+        continue;
+      }
+      row.smsBody = built.text;
+    } else {
+      row.smsBody = F.followupSms(row);
+    }
     const decision = F.decideDispatch({ settings: flags, row, env: runtimeEnv });
     if (decision.action === "dry_run") {
       await admin.from("job_followups").update({

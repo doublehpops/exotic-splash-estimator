@@ -13,20 +13,23 @@ const TZ='America/Chicago';
 const WINDOW_START_MIN=9*60;
 const WINDOW_END_MIN=20*60;
 const COMPANY_NAME='Exotic Splash Epoxy';
+const COMPANY_PHONE='312-584-2873';
+const SIGN_OFF='- Exotic Splash Epoxy LLC';
 const DEFAULT_FROM='+13125842873';
 const SURVEY_BASE='https://doublehpops.github.io/exotic-splash-estimator/survey.html';
 const MAX_ATTEMPTS=3;
 const TOKEN_RE=/^s[A-Za-z0-9_-]{16}$/;
 const STOP_WORDS=['stop','stopall','unsubscribe','cancel','end','quit','optout','revoke'];
 const TERMINAL=['sent','completed','skipped','opted_out','dry_run','sms_not_configured'];
+const STEP_IDS=['visit_confirm','visit_reminder','quote_thanks','booked_install','undecided_check','last_check','review'];
+const WEEKDAYS=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+const MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
 const SURVEY_QUESTIONS=[
-  {id:'on_time',prompt:'Was the estimator on time?',type:'yes_no'},
-  {id:'professional',prompt:'Was the estimator professional?',type:'yes_no'},
-  {id:'explained',prompt:'Was everything explained right?',type:'yes_no'},
-  {id:'experience',prompt:'How did you like the experience?',type:'scale_1_5'},
-  {id:'improve',prompt:'What should we improve?',type:'text'},
-  {id:'booked',prompt:'Did you book with us?',type:'yes_no'},
-  {id:'why_not',prompt:'If not, why?',type:'text'}
+  {id:'on_time',prompt:'Did your estimator show up on time?',type:'yes_no'},
+  {id:'explained',prompt:'Did they clearly explain your options and pricing?',type:'scale_1_5'},
+  {id:'professional',prompt:'Were they professional and respectful of your home or business?',type:'scale_1_5'},
+  {id:'likely',prompt:'How likely are you to book with us?',type:'yes_maybe_no'},
+  {id:'improve',prompt:'Anything we could do better?',type:'text'}
 ];
 
 function nodeCrypto(){
@@ -98,13 +101,23 @@ function inWindow(instant){
   const minutes=p.hour*60+p.minute;
   return minutes>=WINDOW_START_MIN&&minutes<WINDOW_END_MIN;
 }
+function stepFlags(src){
+  const raw=src&&src.steps&&typeof src.steps==='object'?src.steps:{};
+  const steps={};
+  for(const id of STEP_IDS)steps[id]=raw[id]===true;
+  return steps;
+}
 function normalizeFlags(settings){
   const src=settings&&settings.followups?settings.followups:settings||{};
   return {
     enabled:src.enabled===true,
     dryRun:src.dryRun!==false,
-    voiceEnabled:src.voiceEnabled===true
+    voiceEnabled:src.voiceEnabled===true,
+    steps:stepFlags(src)
   };
+}
+function isSequenceStep(step){
+  return STEP_IDS.indexOf(step)>=0;
 }
 function toE164(phone){
   const raw=String(phone||'').trim();
@@ -216,7 +229,7 @@ function surveyUrl(base,token){
 function followupSms(input){
   const name=input.firstName?('Hi '+input.firstName+', '):'Hi, ';
   const project=plainWords(input.projectSummary||'')||'project';
-  let text=name+'this is Ashley with Exotic Splash Epoxy. Thanks for having us out to look at your '+project+'.';
+  let text=name+'this is Exotic Splash Epoxy LLC. Thanks for having us out to look at your '+project+'.';
   if(input.outcome==='booked'){
     text+=" Thanks for choosing us. We'll reach out to confirm next steps.";
   }else if(input.outcome==='declined'){
@@ -225,7 +238,7 @@ function followupSms(input){
     text+=' If you have any questions about the quote, just reply here.';
   }
   text+=' Got a minute? Tell us how we did: '+(input.surveyUrl||'');
-  text+='\n- Ashley, Exotic Splash\nReply STOP to opt out.';
+  text+='\n'+SIGN_OFF+'\nReply STOP to opt out.';
   return text;
 }
 function dynamicVariables(input){
@@ -411,6 +424,10 @@ async function runDispatch(opts){
       results.push({id:row.id,action:'hold',reason:'disabled'});
       continue;
     }
+    if(isSequenceStep(row.step)&&!flags.steps[row.step]){
+      results.push({id:row.id,action:'hold',reason:'step_disabled'});
+      continue;
+    }
     const claimed=claimFollowup(row,now,{voiceEnabled:flags.voiceEnabled});
     if(!claimed.ok){
       results.push({id:row.id,action:'skip',reason:claimed.reason});
@@ -551,6 +568,8 @@ function recordInbound(row,message){
     row.optedOut=true;
     row.optedOutAt=message.at||new Date().toISOString();
     if(['scheduled','failed','sending','dry_run'].indexOf(row.status)>=0)row.status='opted_out';
+  }else if(isYesConfirm(message.body)){
+    row.visitConfirmedAt=message.at||new Date().toISOString();
   }else if(!row.outcomeReason){
     const why=replyWhyNot(message,row.jobOutcome||row.outcome,message.analysis);
     if(why)row.outcomeReason=why;
@@ -612,6 +631,19 @@ function yesNo(value){
 function cleanText(value){
   return String(value==null?'':value).replace(/\u0000/g,'').trim().slice(0,1000);
 }
+function scale15(value){
+  if(typeof value==='boolean')return null;
+  const n=Number(value);
+  if(!Number.isInteger(n)||n<1||n>5)return null;
+  return n;
+}
+function likelyAnswer(value){
+  const s=String(value==null?'':value).trim().toLowerCase();
+  if(s==='yes'||s==='y')return 'yes';
+  if(s==='no'||s==='n')return 'no';
+  if(s==='maybe'||s==='m')return 'maybe';
+  return '';
+}
 function validateSurveyAnswers(input){
   const src=input&&typeof input==='object'&&!Array.isArray(input)?input:{};
   const allowed={};
@@ -622,21 +654,19 @@ function validateSurveyAnswers(input){
   }
   const answers={
     on_time:yesNo(src.on_time),
-    professional:yesNo(src.professional),
-    explained:yesNo(src.explained),
-    experience:Number(src.experience),
-    improve:cleanText(src.improve),
-    booked:yesNo(src.booked),
-    why_not:cleanText(src.why_not)
+    explained:scale15(src.explained),
+    professional:scale15(src.professional),
+    likely:likelyAnswer(src.likely),
+    improve:cleanText(src.improve)
   };
-  if(!answers.on_time||!answers.professional||!answers.explained||!answers.booked){
+  if(!answers.on_time||!answers.likely){
     return {ok:false,code:'invalid',error:'Please answer each question'};
   }
-  if(!Number.isInteger(answers.experience)||answers.experience<1||answers.experience>5){
-    return {ok:false,code:'invalid',error:'Please rate the experience from 1 to 5'};
+  if(answers.explained==null){
+    return {ok:false,code:'invalid',error:'Please rate the explanation from 1 to 5'};
   }
-  if(answers.booked==='no'&&!answers.why_not){
-    return {ok:false,code:'invalid',error:'Please tell us what held you back'};
+  if(answers.professional==null){
+    return {ok:false,code:'invalid',error:'Please rate professionalism from 1 to 5'};
   }
   return {ok:true,answers:answers};
 }
@@ -674,16 +704,364 @@ function openSurvey(record,token){
 function textNowAt(now){
   return rollIntoWindow(now instanceof Date?now:new Date(now));
 }
+function isYesConfirm(body){
+  const words=stopWords(body);
+  return words.length===1&&(words[0]==='yes'||words[0]==='y');
+}
+function weekdayIndex(date){
+  const map={Sun:0,Mon:1,Tue:2,Wed:3,Thu:4,Fri:5,Sat:6};
+  return map[chicagoWeekday(date)];
+}
+function formatDayDate(date){
+  const p=chicagoParts(date);
+  return WEEKDAYS[weekdayIndex(date)]+', '+MONTHS[p.month-1]+' '+p.day;
+}
+function formatDateLabel(date){
+  const p=chicagoParts(date);
+  return MONTHS[p.month-1]+' '+p.day;
+}
+function chicagoDateKey(date){
+  const p=chicagoParts(date instanceof Date?date:new Date(date));
+  return p.year+'-'+pad(p.month)+'-'+pad(p.day);
+}
+function previousDateKey(date){
+  const p=chicagoParts(date instanceof Date?date:new Date(date));
+  const prev=addCalendarDays(p.year,p.month,p.day,-1);
+  return prev.year+'-'+pad(prev.month)+'-'+pad(prev.day);
+}
+function formatTimeLabel(date){
+  const p=chicagoParts(date);
+  let h=p.hour;
+  const suffix=h>=12?'PM':'AM';
+  h=h%12;
+  if(h===0)h=12;
+  return h+':'+pad(p.minute)+' '+suffix;
+}
+function formatMoney(amount){
+  const n=Number(amount);
+  if(!Number.isFinite(n)||n<=0)return '';
+  const cents=Math.round(n*100);
+  const dollars=Math.floor(cents/100);
+  const rem=cents%100;
+  const withCommas=String(dollars).replace(/\B(?=(\d{3})+(?!\d))/g,',');
+  if(rem===0)return '$'+withCommas;
+  return '$'+withCommas+'.'+String(rem).padStart(2,'0');
+}
+function moneyValue(amount){
+  const n=Number(amount);
+  if(!Number.isFinite(n)||n<=0)return null;
+  return Math.round(n*100)/100;
+}
+function parseDateOnly(value){
+  const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value||'').trim());
+  if(!m)return null;
+  const year=Number(m[1]),month=Number(m[2]),day=Number(m[3]);
+  if(month<1||month>12||day<1||day>31)return null;
+  return atChicago(year,month,day,12,0);
+}
+function placeInSendWindow(instant){
+  const date=instant instanceof Date?instant:new Date(instant);
+  const p=chicagoParts(date);
+  const minutes=p.hour*60+p.minute;
+  if(chicagoWeekday(date)==='Sun'){
+    const mon=addCalendarDays(p.year,p.month,p.day,1);
+    return atChicago(mon.year,mon.month,mon.day,10,0);
+  }
+  if(minutes>=WINDOW_START_MIN&&minutes<WINDOW_END_MIN)return new Date(date.getTime());
+  if(minutes<WINDOW_START_MIN){
+    const at=atChicago(p.year,p.month,p.day,9,0);
+    if(chicagoWeekday(at)==='Sun'){
+      const mon=addCalendarDays(p.year,p.month,p.day,1);
+      return atChicago(mon.year,mon.month,mon.day,10,0);
+    }
+    return at;
+  }
+  const next=addCalendarDays(p.year,p.month,p.day,1);
+  const at=atChicago(next.year,next.month,next.day,9,0);
+  if(chicagoWeekday(at)==='Sun'){
+    const mon=addCalendarDays(next.year,next.month,next.day,1);
+    return atChicago(mon.year,mon.month,mon.day,10,0);
+  }
+  return at;
+}
+function daysAfterAt10(from,days){
+  const p=chicagoParts(from instanceof Date?from:new Date(from));
+  const d=addCalendarDays(p.year,p.month,p.day,days);
+  let at=atChicago(d.year,d.month,d.day,10,0);
+  if(chicagoWeekday(at)==='Sun'){
+    const mon=addCalendarDays(d.year,d.month,d.day,1);
+    at=atChicago(mon.year,mon.month,mon.day,10,0);
+  }
+  return at;
+}
+function undecidedWhen(quoteAt){
+  const from=quoteAt instanceof Date?quoteAt:new Date(quoteAt);
+  let at=daysAfterAt10(from,2);
+  if(at.getTime()<from.getTime()+48*60*60*1000)at=daysAfterAt10(from,3);
+  return at;
+}
+function reminderWhen(visitAt){
+  const p=chicagoParts(visitAt);
+  const prev=addCalendarDays(p.year,p.month,p.day,-1);
+  let at=atChicago(prev.year,prev.month,prev.day,10,0);
+  if(chicagoWeekday(at)==='Sun'){
+    const mon=addCalendarDays(prev.year,prev.month,prev.day,1);
+    at=atChicago(mon.year,mon.month,mon.day,10,0);
+  }
+  return at;
+}
+function reviewWhen(visitAt){
+  return placeInSendWindow(new Date(visitAt.getTime()+2*60*60*1000));
+}
+function withSignoff(body,includeStop){
+  let text=String(body||'').replace(/\s+$/,'')+'\n'+SIGN_OFF;
+  if(includeStop)text+='\nReply STOP to opt out.';
+  return text;
+}
+function greetingName(input){
+  const explicit=String(input&&input.greetingName||'').trim();
+  if(explicit)return explicit.slice(0,40);
+  return firstName(input&&(input.firstName||input.customer));
+}
+function sequenceSms(step,input){
+  input=input||{};
+  const name=greetingName(input);
+  const hi=name?('Hi '+name+', '):'Hi, ';
+  const project=plainWords(input.projectSummary||'');
+  const total=formatMoney(input.quoteTotal);
+  const visit=input.visitAt?new Date(input.visitAt):null;
+  const visitOk=visit&&!Number.isNaN(visit.getTime());
+  const address=String(input.address||'').replace(/\s+/g,' ').trim();
+  const install=input.installAt?new Date(input.installAt):(input.installDate?parseDateOnly(input.installDate):null);
+  const installOk=install&&!Number.isNaN(install.getTime());
+  const survey=String(input.surveyUrl||'').trim();
+  let body='';
+  let missing='';
+  if(step==='visit_confirm'){
+    if(!visitOk)missing='missing_visit';
+    else if(!address)missing='missing_address';
+    else body=hi+'this is Exotic Splash Epoxy LLC. Your free on-site estimate is set for '+formatDayDate(visit)+' at '+formatTimeLabel(visit)+' at '+address+". We'll measure the space, look at the slab, and give you a real number. Need to change the time? Call or text "+COMPANY_PHONE+'.';
+  }else if(step==='visit_reminder'){
+    if(!visitOk)missing='missing_visit';
+    else{
+      let dayWord='tomorrow, '+formatDateLabel(visit);
+      if(input.scheduledFor){
+        const send=new Date(input.scheduledFor);
+        const sendKey=chicagoDateKey(send);
+        if(sendKey===chicagoDateKey(visit))dayWord='today, '+formatDateLabel(visit);
+        else if(sendKey!==previousDateKey(visit))dayWord='on '+formatDateLabel(visit);
+      }
+      body=hi+"just a reminder that we'll see you "+dayWord+', at '+formatTimeLabel(visit)+' for your free epoxy estimate. Reply YES to confirm, or text us if you need a different time.';
+    }
+  }else if(step==='quote_thanks'){
+    if(!project)missing='missing_project';
+    else if(!total)missing='missing_quote';
+    else{
+      const who=name?(', '+name):'';
+      body='Thanks for having us out today'+who+'. Your estimate for '+project+' comes to '+total+'. Any questions at all, just text me back. We can usually start within a week.';
+    }
+  }else if(step==='booked_install'){
+    if(!installOk)missing='missing_install';
+    else{
+      const who=name?(', '+name):'';
+      body='Thank you'+who+"! We're excited to get started. Your install is set for "+formatDayDate(install)+". We'll text you before we head over. If you have any questions before then, call or text "+COMPANY_PHONE+'.';
+    }
+  }else if(step==='undecided_check'){
+    if(!project)missing='missing_project';
+    else if(!total)missing='missing_quote';
+    else body=hi+"just checking in on your floor estimate. If price is what's holding you back, send us any written quote you got and we'll match it or beat it. Your quote for "+project+' was '+total+', and every floor comes with our lifetime warranty. Want me to save you a start date?';
+  }else if(step==='last_check'){
+    body=hi+"I don't want to keep bugging you, so this is my last check-in. If you still want the floor done, just reply and we'll get you on the schedule. If now's not the right time, no problem. We're here whenever you're ready.";
+  }else if(step==='review'){
+    if(!survey)missing='missing_survey';
+    else{
+      const who=name?(', '+name):'';
+      body='Thanks again for meeting with us'+who+'. Could you take 1 minute to tell us how your estimate visit went? It helps us train our team: '+survey;
+    }
+  }else missing='unknown_step';
+  if(missing)return {ok:false,reason:missing,text:''};
+  return {ok:true,reason:'',text:withSignoff(body,input.includeStop===true)};
+}
+function planSequence(existingList,event){
+  event=event||{};
+  const existing={};
+  for(const row of existingList||[]){
+    if(row&&row.step)existing[row.step]=row;
+  }
+  const at=event.at instanceof Date?event.at:new Date(event.at||Date.now());
+  const outcome=jobOutcome(event.outcome);
+  const phone=toE164(event.phone);
+  const consent=event.consent===true;
+  const name=firstName(event.firstName||event.customer);
+  const project=plainWords(event.projectSummary||'');
+  const quoteTotal=moneyValue(event.quoteTotal);
+  const visitAt=event.visitAt?new Date(event.visitAt):null;
+  const visitOk=visitAt&&!Number.isNaN(visitAt.getTime());
+  const address=String(event.address||'').replace(/\s+/g,' ').trim();
+  const installDate=String(event.installDate||'').trim();
+  const installAt=installDate?parseDateOnly(installDate):null;
+  const quoteAt=event.quoteAt?new Date(event.quoteAt):(event.quoteDone?at:null);
+  const quoteOk=quoteAt&&!Number.isNaN(quoteAt.getTime());
+  const frozen=['sent','completed','sending','dry_run','failed','sms_not_configured','opted_out'];
+  const plans=[];
+  function finish(step,prev,row){
+    if(!row){
+      if(prev)plans.push({action:'leave',row:prev});
+      return;
+    }
+    plans.push({action:prev?'update':'insert',row:row});
+  }
+  function blocked(row,prev){
+    const when=(prev&&prev.scheduledFor)||row.scheduledFor;
+    if(event.optedOut===true)return Object.assign(row,{status:'opted_out',reason:'opted_out',scheduledFor:when});
+    if(!consent)return Object.assign(row,{status:'skipped',reason:'no_consent',scheduledFor:when});
+    if(!phone)return Object.assign(row,{status:'skipped',reason:'no_phone',scheduledFor:when});
+    return row;
+  }
+  function keepWhen(prev,when,anchor){
+    if(prev&&prev.status==='scheduled'&&prev.anchor===anchor&&prev.scheduledFor)return prev.scheduledFor;
+    return when;
+  }
+  function put(step,spec){
+    const prev=existing[step]||null;
+    if(prev&&frozen.indexOf(prev.status)>=0){
+      plans.push({action:'leave',row:prev});
+      return;
+    }
+    if(!spec){
+      finish(step,prev,null);
+      return;
+    }
+    const anchor=spec.anchor||'';
+    const when=keepWhen(prev,spec.scheduledFor,anchor);
+    const vars={
+      quoteTotal:quoteTotal,
+      project:project,
+      visitAt:visitOk?visitAt.toISOString():'',
+      address:address,
+      installDate:installDate,
+      anchor:anchor
+    };
+    let row=Object.assign({},prev,{
+      step:step,
+      channel:'sms',
+      jobOutcome:outcome,
+      consent:consent,
+      phoneE164:phone,
+      projectSummary:project,
+      firstName:name,
+      attemptCount:prev?prev.attemptCount||0:0,
+      maxAttempts:MAX_ATTEMPTS,
+      status:spec.status,
+      reason:spec.reason||'',
+      scheduledFor:when,
+      anchor:anchor,
+      stepVars:vars,
+      includeStop:false
+    });
+    if(event.optedOut===true){
+      row.status='opted_out';
+      row.reason='opted_out';
+    }else if(row.status==='scheduled'){
+      row=blocked(row,prev);
+    }
+    finish(step,prev,row);
+  }
+  if(visitOk&&address){
+    const when=placeInSendWindow(at);
+    const late=when.getTime()>=visitAt.getTime();
+    put('visit_confirm',{
+      status:late?'skipped':'scheduled',
+      reason:late?'visit_passed':'',
+      scheduledFor:when,
+      anchor:'visit:'+visitAt.toISOString()+'|'+address
+    });
+  }else put('visit_confirm',null);
+  if(visitOk){
+    const when=reminderWhen(visitAt);
+    const late=when.getTime()>=visitAt.getTime();
+    put('visit_reminder',{
+      status:late?'skipped':'scheduled',
+      reason:late?'window_after_visit':'',
+      scheduledFor:when,
+      anchor:'visit:'+visitAt.toISOString()
+    });
+  }else put('visit_reminder',null);
+  if(quoteOk){
+    const missing=!project?'missing_project':(!quoteTotal?'missing_quote':'');
+    put('quote_thanks',{
+      status:missing?'skipped':'scheduled',
+      reason:missing,
+      scheduledFor:placeInSendWindow(quoteAt),
+      anchor:'quote:'+quoteAt.toISOString()+'|'+project+'|'+String(quoteTotal||'')
+    });
+  }else put('quote_thanks',null);
+  if(outcome==='booked'){
+    put('booked_install',{
+      status:installAt?'scheduled':'skipped',
+      reason:installAt?'':'missing_install',
+      scheduledFor:placeInSendWindow(at),
+      anchor:'install:'+installDate
+    });
+  }else if(existing.booked_install){
+    put('booked_install',{status:'skipped',reason:'not_booked',scheduledFor:placeInSendWindow(at),anchor:'install:'+installDate});
+  }else put('booked_install',null);
+  if(quoteOk){
+    const cancel=outcome==='booked'?'booked':(outcome==='declined'?'declined':'');
+    const missing=!project?'missing_project':(!quoteTotal?'missing_quote':'');
+    put('undecided_check',{
+      status:cancel||missing?'skipped':'scheduled',
+      reason:cancel||missing,
+      scheduledFor:undecidedWhen(quoteAt),
+      anchor:'quote:'+quoteAt.toISOString()+'|'+outcome+'|'+String(quoteTotal||'')
+    });
+    put('last_check',{
+      status:cancel?'skipped':'scheduled',
+      reason:cancel,
+      scheduledFor:daysAfterAt10(quoteAt,7),
+      anchor:'quote:'+quoteAt.toISOString()+'|'+outcome
+    });
+  }else{
+    put('undecided_check',null);
+    put('last_check',null);
+  }
+  if(visitOk){
+    put('review',{
+      status:'scheduled',
+      reason:'',
+      scheduledFor:reviewWhen(visitAt),
+      anchor:'visit:'+visitAt.toISOString()
+    });
+  }else put('review',null);
+  const sendable=plans.filter(function(p){
+    return p.row&&(p.row.status==='scheduled'||p.row.status==='failed')&&p.action!=='leave';
+  }).sort(function(a,b){
+    const ta=new Date(a.row.scheduledFor).getTime();
+    const tb=new Date(b.row.scheduledFor).getTime();
+    if(ta!==tb)return ta-tb;
+    return STEP_IDS.indexOf(a.row.step)-STEP_IDS.indexOf(b.row.step);
+  });
+  if(event.alreadyTexted!==true&&sendable.length){
+    sendable[0].row.includeStop=true;
+    if(sendable[0].row.stepVars)sendable[0].row.stepVars.includeStop=true;
+  }
+  return {steps:plans.filter(function(p){return p.row;})};
+}
 
 return {
   TZ:TZ,WINDOW_START_MIN:WINDOW_START_MIN,WINDOW_END_MIN:WINDOW_END_MIN,
-  COMPANY_NAME:COMPANY_NAME,DEFAULT_FROM:DEFAULT_FROM,SURVEY_BASE:SURVEY_BASE,
+  COMPANY_NAME:COMPANY_NAME,COMPANY_PHONE:COMPANY_PHONE,SIGN_OFF:SIGN_OFF,
+  DEFAULT_FROM:DEFAULT_FROM,SURVEY_BASE:SURVEY_BASE,
   MAX_ATTEMPTS:MAX_ATTEMPTS,TOKEN_RE:TOKEN_RE,SURVEY_QUESTIONS:SURVEY_QUESTIONS,
+  STEP_IDS:STEP_IDS,
   chicagoParts:chicagoParts,zonedTimeToUtc:zonedTimeToUtc,nextFollowupAt:nextFollowupAt,
   rollIntoWindow:rollIntoWindow,inWindow:inWindow,normalizeFlags:normalizeFlags,
   toE164:toE164,firstName:firstName,plainWords:plainWords,projectSummary:projectSummary,
   jobOutcome:jobOutcome,quoteIsDone:quoteIsDone,consentGiven:consentGiven,
-  surveyUrl:surveyUrl,followupSms:followupSms,dynamicVariables:dynamicVariables,
+  surveyUrl:surveyUrl,followupSms:followupSms,sequenceSms:sequenceSms,planSequence:planSequence,
+  placeInSendWindow:placeInSendWindow,undecidedWhen:undecidedWhen,reminderWhen:reminderWhen,
+  formatMoney:formatMoney,formatDayDate:formatDayDate,formatTimeLabel:formatTimeLabel,
+  dynamicVariables:dynamicVariables,isSequenceStep:isSequenceStep,isYesConfirm:isYesConfirm,
   smsProvider:smsProvider,providerReady:providerReady,buildRetellSms:buildRetellSms,
   buildTwilioSms:buildTwilioSms,buildVoiceRequest:buildVoiceRequest,redactLog:redactLog,
   decideDispatch:decideDispatch,claimFollowup:claimFollowup,planSchedule:planSchedule,

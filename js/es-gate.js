@@ -439,8 +439,11 @@ async function saveFollowupSettings(){
   const enabled=!!($('fuEnabled')&&$('fuEnabled').checked);
   const dryRun=!($('fuDryRun')&&$('fuDryRun').checked===false);
   const voice=!!($('fuVoice')&&$('fuVoice').checked);
+  const stepIds=['visit_confirm','visit_reminder','quote_thanks','booked_install','undecided_check','last_check','review'];
+  const steps={};
+  for(const id of stepIds)steps[id]=!!($('fuStep_'+id)&&$('fuStep_'+id).checked);
   try{
-    rt.followupSettings=await cloud.setFollowupSettings(enabled,dryRun,voice);
+    rt.followupSettings=await cloud.setFollowupSettings(enabled,dryRun,voice,steps);
     toast(enabled?'Follow-ups enabled. Dry run still blocks a real text until you turn it off.':'Follow-ups stay off.');
     G().render();
   }catch(e){toast(e.message)}
