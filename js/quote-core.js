@@ -82,8 +82,7 @@ function computeAreaSqft(a){
   if(a.sqftMode==='rectangles'){const sum=(a.rectangles||[]).reduce((s,r)=>s+(Number(r.length)||0)*(Number(r.width)||0),0);return Math.round(sum*100)/100}
   return Number(a.sqft)||0;
 }
-function prepareJob(E,raw){
-  const j=Object.assign(E.newJob(),clone(raw||{}));
+function prepareScope(E,j){
   if(E.blankExtras)j.extras=Object.assign(E.blankExtras(),j.extras||{});
   j.areas=Array.isArray(j.areas)&&j.areas.length?j.areas:[E.newArea()];
   j.catalogItems=Array.isArray(j.catalogItems)?j.catalogItems:[];
@@ -104,12 +103,33 @@ function prepareJob(E,raw){
   if(anyAdhesive)j.condition='adhesive';else if(anyRemoval)j.condition='paint';
   return j;
 }
+function sectionRecord(E,raw){
+  const child=prepareScope(E,Object.assign(E.newJob(),clone(raw||{})));
+  return {
+    id:raw&&raw.id||child.id,label:raw&&raw.label||'',address:raw&&raw.address||'',
+    projectType:child.projectType,areas:child.areas,condition:child.condition,patchKits:child.patchKits,
+    garagePackage:child.garagePackage,garageStyle:child.garageStyle,garageTopcoat:child.garageTopcoat,
+    garageCondition:child.garageCondition,garagePrep:child.garagePrep,extras:child.extras,catalogItems:child.catalogItems
+  };
+}
+function prepareJob(E,raw){
+  const j=prepareScope(E,Object.assign(E.newJob(),clone(raw||{})));
+  if(Array.isArray(raw&&raw.sections)){
+    j.sections=raw.sections.filter(s=>s&&typeof s==='object'&&!Array.isArray(s)).map(s=>sectionRecord(E,s));
+  }
+  return j;
+}
 /** Strip heavy / irrelevant fields before sending a job for preview. */
 function jobForTransport(job){
   const j=clone(job||{});
   delete j.history;delete j.step;
   for(const a of j.areas||[]){delete a.photos;delete a.conditionPhotos}
   for(const it of j.catalogItems||[]){delete it.photos}
+  for(const s of j.sections||[]){
+    if(!s||typeof s!=='object')continue;
+    for(const a of s.areas||[]){delete a.photos;delete a.conditionPhotos}
+    for(const it of s.catalogItems||[]){delete it.photos}
+  }
   delete j.photos;
   return j;
 }
@@ -119,8 +139,13 @@ function applyEmployeeLocks(job,stored){
   job.method=s.method||'rates';
   job.agreedTotal=Number(s.agreedTotal)||0;
   job.includeInternalInCustomer=false;
-  const byId={};for(const a of (s.areas||[]))if(a&&a.id)byId[a.id]=a;
-  for(const a of job.areas||[]){const o=byId[a.id];a.rate=o&&o.rate!==undefined?o.rate:null}
+  const lockAreas=(areas,storedAreas)=>{
+    const byId={};for(const a of (storedAreas||[]))if(a&&a.id)byId[a.id]=a;
+    for(const a of areas||[]){const o=byId[a.id];a.rate=o&&o.rate!==undefined?o.rate:null}
+  };
+  lockAreas(job.areas,s.areas);
+  const storedSections=Array.isArray(s.sections)?s.sections:[];
+  (job.sections||[]).forEach((sec,i)=>lockAreas(sec.areas,(storedSections[i]||{}).areas));
   return job;
 }
 
@@ -159,7 +184,7 @@ function quoteAllocation(x){
     materials,labor,other,subtotal,salesTax,total,sumParts,reconciles:Math.abs(sumParts-subtotal)<0.015};
 }
 const COST_WARNING=/cost|profit|margin|markup|\/mi\b|per mile|mileage rate|pay rate|hourly|wage|overhead \$|supplier/i;
-function staffWarnings(ws){return (ws||[]).filter(w=>!COST_WARNING.test(String(w)))}
+function staffWarnings(ws){return (ws||[]).filter(w=>!COST_WARNING.test(String(w))&&!/price not set/i.test(String(w)))}
 function safeChoice(c){
   return{key:c.key,label:c.label,short:c.short,rate:n(c.rate),project:n(c.project),adjustment:n(c.adjustment),pre:n(c.pre),
     minimum:n(c.minimum),discount:n(c.discount),subtotal:n(c.subtotal),salesTax:n(c.salesTax),total:n(c.total),
@@ -198,15 +223,24 @@ function staffSnapshot(E,job,x,settings){
     quoteReady:!!x.quoteReady,quoteStatus:x.quoteStatus||'',pendingReasons:clone(x.pendingReasons||[]),
     catalog:cat,
     allocation:quoteAllocation(x),
-    cap,capBase:r2(capBase(x)),capMode:approvedAdjustment(settings).mode
+    cap,capBase:r2(capBase(x)),capMode:approvedAdjustment(settings).mode,
+    ...(Array.isArray(x.sections)&&x.sections.length>1?{sections:x.sections.map(s=>({label:String(s.label||''),type:String(s.projectType||''),address:String(s.address||''),subtotal:n(s.subtotal),sqft:n(s.sqft),quoteReady:!!s.quoteReady}))}:{})
   };
 }
 /** Owner-only internal figures. */
 function internalSnapshot(x,markupPct){
-  return{cost:n(x.cost),profit:n(x.profit),margin:n(x.margin),mat:n(x.mat),tax:n(x.tax),labor:n(x.labor),equip:n(x.equip),
+  const out={cost:n(x.cost),profit:n(x.profit),margin:n(x.margin),mat:n(x.mat),tax:n(x.tax),labor:n(x.labor),equip:n(x.equip),
     direct:n(x.direct),overhead:n(x.overhead),overheadBase:n(x.overheadBase),contingency:n(x.contingency),
     grossProfit:n(x.grossProfit),grossMargin:n(x.grossMargin),operatingProfit:n(x.operatingProfit),operatingMargin:n(x.operatingMargin),
     travelCost:n(x.travelCost),travelInQuote:n(x.travelInQuote),markupPct:markupPct==null?null:n(markupPct)};
+  if(Array.isArray(x.sections)&&x.sections.length>1){
+    out.sections=x.sections.map(s=>({label:String(s.label||''),type:String(s.projectType||''),subtotal:n(s.subtotal),cost:n(s.cost),profit:n(s.profit),margin:n(s.margin)}));
+  }
+  if(Array.isArray(x.unpricedLines)&&x.unpricedLines.length)out.unpricedLines=x.unpricedLines.map(String);
+  if(Array.isArray(x.unpricedExtras)&&x.unpricedExtras.length){
+    out.unpricedExtras=x.unpricedExtras.map(u=>({label:String(u.label||''),note:'price not set'}));
+  }
+  return out;
 }
 function isCatalogJob(E,j){const t=E.projectTypeOf(j);return t==='flatwork'||t==='seating'||(t==='garage'&&!E.garageUsesMeasured(j))}
 /** Whitelisted customer document data (DB re-whitelists via private.customer_safe_snapshot). */
@@ -251,6 +285,7 @@ function customerSnapshot(E,job,x,settings){
     addOn:x.addOn&&x.addOn.included?{included:true,label:x.addOn.label||'',rate:n(x.addOn.rate)}:{included:false},
     allocation:(()=>{const q=quoteAllocation(x);return{materials:q.materials,labor:q.labor,other:q.other,subtotal:q.subtotal,salesTax:q.salesTax,total:q.total}})(),
     quoteReady:!!x.quoteReady,quoteStatus:x.quoteStatus||'',pendingReasons:(x.pendingReasons||[]).map(String),
+    ...(Array.isArray(x.sections)&&x.sections.length>1?{sections:x.sections.map(s=>({label:String(s.label||''),type:String(s.projectType||''),address:String(s.address||''),subtotal:s.quoteReady?n(s.subtotal):0,quoteReady:!!s.quoteReady}))}:{}),
     priceNotes:settings.notes||'',terms:job.terms||'',jobNotes:job.notes||''
   };
 }
