@@ -23,6 +23,7 @@ function acceptanceHTML(docName,ready,acceptance){
 }
 function render(payload,acceptance){
   if(!payload||!payload.estimate)return `<section class="est-card"><h1>Estimate not available</h1><p>This link is invalid, expired, or was withdrawn by Exotic Splash. Please contact us for a current estimate.</p></section>`;
+  payload={estimate:payload.estimate,issued_at:payload.issued_at,expires_at:payload.expires_at};
   const e=payload.estimate,b=e.business||{},c=e.customer||{},d=e.document||{},t=e.totals||{},sel=e.selected||{};
   const ready=!!e.quoteReady;
   const docName=d.type==='invoice'?'Invoice':'Estimate';

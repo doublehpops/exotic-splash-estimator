@@ -794,14 +794,15 @@ function garagePackageHTML(j){
     ${j.garagePackage!=='measured'?`${(cat.disclaimer||'').trim()?`<div class="warn-banner"><b>Garage package baseline:</b> ${escape(cat.disclaimer.trim())}</div>`:''}<div class="notice">Package price comes from the tier, system, and size table (1-car 250 sq ft, 2-car 450 sq ft, 3-car 650 sq ft). Square feet above that size use that tier’s per-sq-ft rate for the chosen system. The solid credit is not subtracted when the table has a price. A solid package under 500 sq ft is at least $2,750 in every tier, so 1-car solid Option 1 is $2,750. The $2,000 job minimum still applies.</div>
       <div class="fields">${field('Measured sq ft','job.areas.0.sqft','number','Leave blank to price the typical size only. Square feet above 250 / 450 / 650 use the tier rate.','step="1"')}</div>
       <div class="fields three">
-        ${select('Material / system','job.garageStyle',[['solid','Solid'],['flake','Flake'],['metallic','Metallic'],['sealer','Clear seal'],['custom','Custom / other']])}
+        ${select('Material / system','job.garageStyle',[['solid','Solid'],['flake','Flake'],['metallic','Metallic'],['sealer','Clear seal — use measured sq ft'],['custom','Custom — inspection / override']])}
         ${select('Topcoat','job.garageTopcoat',[['protective','Protective (standard)'],['none','None noted'],['premium','Premium / upgraded']])}
         ${select('Concrete condition','job.garageCondition',[['unknown','Unknown / not inspected'],['good','Good'],['fair','Fair'],['poor','Poor'],['critical','Critical'],['sound','Sound / bare'],['paint','Paint / coating present'],['adhesive','Adhesive residue']])}
       </div>
       <p class="hint">Spalling means the concrete surface is flaking or crumbling.</p>
       <div class="checklist">${[['cracks','Cracks / joints'],['spalling','Poor slab / spalling'],['coatingRemoval','Coating removal'],['paintRemoval','Paint removal'],['patching','Patching'],['leveling','Leveling'],['moisture','Moisture barrier']].map(([k,l])=>{
         const on=!!(j.garagePrep&&j.garagePrep[k]);
-        return `<label class="check-item ${on?'active':''}"><input type="checkbox" data-path="job.garagePrep.${k}" ${on?'checked':''}><div><b>${escape(l)}</b><div class="hint">Changes the price when that prep item has a price in the rate book.</div>      </div></label>`;
+        const hint=k==='leveling'?'Not a flat package price. Leveling on a package stays unfinished until it is measured by area and depth.':'Changes the price when that prep item has a price in the rate book.';
+        return `<label class="check-item ${on?'active':''}"><input type="checkbox" data-path="job.garagePrep.${k}" ${on?'checked':''}><div><b>${escape(l)}</b><div class="hint">${hint}</div></div></label>`;
       }).join('')}</div>
       ${(j.garagePrep&&j.garagePrep.cracks)?field('Crack repair length (linear ft)','job.garagePrep.crackLf','number','$250 up to 10 ft, then $12 per ft.','step="1"'):''}
       ${optionalExtrasHTML(j,'job')}
@@ -828,7 +829,7 @@ function flatworkItemsHTML(j){
         ${select('Material / system',base+'.style',[['solid','Solid'],['flake','Flake'],['metallic','Metallic'],['sealer','Clear seal'],['custom','Custom']])}
         ${select('Topcoat',base+'.topcoat',[['protective','Protective'],['none','None'],['premium','Premium']])}
         ${select('Condition',base+'.condition',[['unknown','Unknown / not inspected'],['good','Good'],['fair','Fair'],['poor','Poor'],['critical','Critical']])}
-        ${field('Item starting price override ($)',base+'.customStarting','number','Blank uses size-band price book. Leave blank if unconfigured.','step="any"')}
+        ${field('Item starting price override ($)',base+'.customStarting','number','Optional. Blank keeps the size-band price. A blank override is not a missing package price.','step="any"')}
       </div>
       <p class="method-note">Computed size: <b>${num(Number(sf)||0,2)}</b> sq ft (approx).</p>
       ${textArea('Notes / inspection',base+'.notes')}
@@ -1335,6 +1336,7 @@ function ratesView(){
   return heading('YOUR RATE BOOK','Costs & pricing.','Owner-approved rates. Workers use locked values.','')
   +roleBadgeHTML()
   +`<div class="rate-banner"><span>◉</span><p><b>${authMode()?(owner?'Owner — edits are a draft until you save the price book to the server.':'Employee — rate book set by the owner (server-enforced).'):(owner?'Owner preview — rates editable in this demo.':'Worker preview — rate book locked.')}</b> ${owner?(authMode()?'Draft changes update estimates on this screen; employees and customer links use the saved server version.':'Changing numbers here updates estimates in this browser only.'):'Workers enter job details and create estimates using approved rates; they cannot change product prices, labor, travel, equipment, or overhead rates. Profit and margin stay owner-only.'}</p></div>
+  ${(typeof window!=='undefined'&&window.EsPriceProposals&&owner)?window.EsPriceProposals.proposalReviewHTML(state.settings,true):''}
   ${authMode()?(runtime.priceBookPanelHTML?runtime.priceBookPanelHTML():''):`<div class="warn-banner"><b>OFFLINE DEMO — NOT SECURE.</b> <b>Preview only — not security.</b> This OWNER/WORKER switch demonstrates UX in a local HTML file. It is <b>not</b> authenticated access control. Real owner-only enforcement requires authenticated deployment with server-side authorization. No sign-in service is configured.</div>`}
   ${bookIssuesHTML()}
   <details open><summary>Customer selling rates ${owner?'':'🔒'}</summary><div class="detail-body"><div class="fields three">${Object.entries({solid:'Solid epoxy / sq ft',flake:'Flake epoxy / sq ft',metallic:'Metallic epoxy / sq ft',sealer:'Clear seal / sq ft',level:'Leveling / sq ft at ¼ inch',removal:'Extra removal / sq ft',moisture:'Moisture control / sq ft',extraCoat:'Additional solid base coat / sq ft',mediumFlakeExtra:'Medium flake premium / sq ft',fullFlakeExtra:'Full flake premium / sq ft'}).map(([k,v])=>lockedField(v,'settings.rates.'+k,'number','$0–$40 per sq ft. Above $20 asks the owner to confirm.','min="0" max="40" step="0.01" inputmode="decimal"')).join('')}${lockedField('Patch / kit installed','settings.rates.patch','number')}</div></div></details>
@@ -1485,7 +1487,7 @@ function baselineSheetHTML(j,s,owner,print){
     }
   } else if(type==='flatwork'){
     const bandRows=(cat.flatwork.sizeBands||[]).map(b=>`<tr><td>${escape(b.label||b.id)}</td><td class="num">${fmtBaselineMoney(b.starting)}</td></tr>`);
-    bandRows.push(`<tr><td>Custom / override starting</td><td class="num">${fmtBaselineMoney(cat.flatwork.customStarting)}</td></tr>`);
+    bandRows.push(`<tr><td>Custom / override starting</td><td class="num">${E.isConfigured(cat.flatwork.customStarting)?fmtBaselineMoney(cat.flatwork.customStarting):'Optional — blank is not a missing price'}</td></tr>`);
     serviceBlocks+=`<h4 style="margin:12px 0 6px;font-size:13px">Size-band starting prices</h4>`+tableHTML(['Band','Baseline'],bandRows);
     serviceBlocks+=`<h4 style="margin:12px 0 6px;font-size:13px">Material adjustments</h4>`+tableHTML(['Adjustment','Baseline'],baselineAdjRows(cat.flatwork.materialAdj,{solid:'Solid',flake:'Flake',metallic:'Metallic',sealer:'Sealer',custom:'Custom'}));
     serviceBlocks+=`<h4 style="margin:12px 0 6px;font-size:13px">Topcoat adjustments</h4>`+tableHTML(['Adjustment','Baseline'],baselineAdjRows(cat.flatwork.topcoatAdj,{protective:'Protective',none:'None',premium:'Premium'}));
@@ -1528,7 +1530,7 @@ function baselineSheetHTML(j,s,owner,print){
   });
   const sectionClass=print?'baseline-sheet':'card baseline-sheet';
   return `<section class="${sectionClass}" style="margin-top:16px"><h3>0. Current baseline — ${escape(areaLabel)}</h3>
-  <p class="method-note">Live price-book baseline for this business area. Pending = unconfigured (blocks a finalized quote). Selling figures are what staff quotes from; product package costs and internal cost rates are owner-only.</p>
+  <p class="method-note">Live price-book baseline for this business area. Pending = unconfigured (blocks a finalized quote) and is not the same as an explicit $0. Selling figures are what staff quotes from; product package costs and internal cost rates are owner-only. Inactive draft proposals are not included in these figures.</p>
   ${notes}
   <h4 style="margin:12px 0 6px;font-size:13px">Services &amp; catalog (selling)</h4>
   ${serviceBlocks||'<p class="method-note">No service baselines for this area.</p>'}

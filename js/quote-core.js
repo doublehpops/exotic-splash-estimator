@@ -207,6 +207,18 @@ function internalSnapshot(x,markupPct){
 }
 function isCatalogJob(E,j){const t=E.projectTypeOf(j);return t==='flatwork'||t==='seating'||(t==='garage'&&!E.garageUsesMeasured(j))}
 /** Whitelisted customer document data (DB re-whitelists via private.customer_safe_snapshot). */
+const SENSITIVE_KEY=/^(cost|profit|margin|markup|markupPct|grossProfit|grossMargin|operatingProfit|operatingMargin|provenance|proposal|proposals|internal|wage|payRate|hourlyPay|ownerSettings|owner_settings|staff_settings|products|verified_unit_cost|internal_material_total|internal_line_total)$/;
+/** Drop owner-only keys from anything that can reach an employee or customer. */
+function scrubSensitive(value){
+  if(Array.isArray(value))return value.map(scrubSensitive);
+  if(!value||typeof value!=='object')return value;
+  const out={};
+  for(const k of Object.keys(value)){
+    if(SENSITIVE_KEY.test(k))continue;
+    out[k]=scrubSensitive(value[k]);
+  }
+  return out;
+}
 function customerSnapshot(E,job,x,settings){
   const b=settings.business||{};const catalog=isCatalogJob(E,job);
   const sel=x.selected||{};
@@ -239,6 +251,8 @@ function customerSnapshot(E,job,x,settings){
     priceNotes:settings.notes||'',terms:job.terms||'',jobNotes:job.notes||''
   };
 }
+function staffSnapshotSafe(E,job,x,settings){return scrubSensitive(staffSnapshot(E,job,x,settings))}
+function customerSnapshotSafe(E,job,x,settings){return scrubSensitive(customerSnapshot(E,job,x,settings))}
 /** Pure server computation. */
 function computeQuote(E,{jobData,staffSettings,ownerSettings,markupPct}){
   const settings=buildSettings(E,staffSettings,ownerSettings);
@@ -334,7 +348,7 @@ async function handleQuoteRequest(body,deps,E){
     if(mode==='record'&&enforce&&(clientDiscount>0||approvalId)&&!discountGate.applied){
       return{status:422,body:{ok:false,code:discountGate.code||'discount_not_approved',error:discountGate.error||'Extra discount was not applied'}};
     }
-    const staff=staffSnapshot(E,job,x,settings);
+    const staff=staffSnapshotSafe(E,job,x,settings);
     staff.discountStatus=discountGate.status;
     const out={ok:true,mode,role:profile.role,coreVersion:CORE_VERSION,priceBookVersion:pb.version,jobVersion:stored?stored.version:null,staff,discountStatus:discountGate.status};
     if(mode==='preview'&&!owner&&n(job.discount)>staff.cap+0.005&&(job.priceOption||'regular')==='regular')
@@ -342,7 +356,7 @@ async function handleQuoteRequest(body,deps,E){
     if(mode==='record'){
       const stop=priceStop(x,owner,body);
       if(stop)return stop;
-      const customer=customerSnapshot(E,job,x,settings);
+      const customer=customerSnapshotSafe(E,job,x,settings);
       delete customer.ownerNote;delete customer.discountApproval;
       const internal=internalSnapshot(x,job.markup);
       const quoteId=await deps.recordQuote({
@@ -357,6 +371,7 @@ async function handleQuoteRequest(body,deps,E){
     if(e instanceof HttpError)return{status:e.status,body:{ok:false,code:e.code,error:e.message}};
     const msg=String(e&&e.message||e);
     if(/exceeds the owner-approved adjustment limit/i.test(msg))return{status:422,body:{ok:false,code:'discount_over_cap',error:'Discount exceeds the owner-approved adjustment limit'}};
+    if(/price book changed/i.test(msg))return{status:409,body:{ok:false,code:'conflict',error:'Price book version mismatch'}};
     if(/changed since|changed during/i.test(msg))return{status:409,body:{ok:false,code:'conflict',error:'Job or price book changed — retry'}};
     if(/cannot access|disabled/i.test(msg))return{status:403,body:{ok:false,code:'forbidden',error:'Not allowed'}};
     return{status:500,body:{ok:false,code:'server_error',error:'Quote calculation failed'}};
@@ -365,5 +380,5 @@ async function handleQuoteRequest(body,deps,E){
 
 return{CORE_VERSION,STAFF_SECTIONS,OWNER_SECTIONS,merge,deepMergeSettings,splitSettings,buildSettings,redactedStaffSettings,recordedDiscountAmount,
   prepareJob,jobForTransport,applyEmployeeLocks,computeAreaSqft,approvedAdjustment,approvedAdjustmentCap,capBase,
-  customerVisibleLines,quoteAllocation,staffWarnings,staffSnapshot,internalSnapshot,customerSnapshot,computeQuote,handleQuoteRequest,HttpError};
+  customerVisibleLines,quoteAllocation,staffWarnings,staffSnapshot,staffSnapshotSafe,internalSnapshot,customerSnapshot,customerSnapshotSafe,scrubSensitive,computeQuote,handleQuoteRequest,HttpError};
 });
