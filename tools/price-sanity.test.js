@@ -241,8 +241,9 @@ check('catalog garage adjustment stays a flat dollar amount',()=>{
   j.areas[0].sqft=450;
   const x=E.calculate(j,settings);
   assert.strictEqual(x.quoteReady,true);
-  assert.strictEqual(x.total,6250);
+  assert.strictEqual(x.total,4500+2250);
   assert.notStrictEqual(x.total,4000+2250*450);
+  assert.notStrictEqual(x.total,4500+2250*450);
   const adj=x.lines.find(l=>l.kind==='adjustment');
   assert.strictEqual(adj.qty,1);
   assert.strictEqual(adj.total,2250);
@@ -258,8 +259,8 @@ check('a negative catalog adjustment is subtracted from the starting price',()=>
   const j=E.newJob();
   Object.assign(j,{customer:'Pat',projectType:'garage',garagePackage:'2car',garageStyle:'flake',garageTopcoat:'protective',garageCondition:'good',miles:0,minutes:0});
   const x=E.calculate(j,settings);
-  assert.strictEqual(x.total,3500);
-  assert.notStrictEqual(x.total,4000);
+  assert.strictEqual(x.total,4500-500);
+  assert.notStrictEqual(x.total,4500);
 });
 
 function garageWithAdj(adj){
@@ -331,18 +332,11 @@ check('a normal 2-car garage passes',()=>{
 });
 
 check('garage, flatwork, and seating sanity boundaries',()=>{
-  function garage(start){
-    const settings=JSON.parse(JSON.stringify(E.defaults));
-    settings.catalog.garage.twoCarStarting=start;
-    settings.catalog.garage.materialAdj.flake=0;
-    const j=E.newJob();
-    Object.assign(j,{customer:'Pat',projectType:'garage',garagePackage:'2car',garageStyle:'flake',garageTopcoat:'protective',garageCondition:'good',miles:0,minutes:0});
-    return E.calculate(j,settings);
-  }
-  assert.strictEqual(garage(8000).sanity.warnings.length,0);
-  assert.ok(warns(garage(8000.01)).includes('over $8,000'));
-  assert.strictEqual(garage(15000).blockingIssues.length,0);
-  assert.ok(msgs(garage(15000.01)).includes('over $15,000'));
+  const pkg=amt=>({projectType:'garage',garagePackage:'2car'},{sqft:0,total:amt,lines:[{kind:'starting',label:'2-car garage package',unit:'package',rate:amt,total:amt}]});
+  assert.strictEqual(S.review({projectType:'garage'},pkg(8000)).warnings.length,0);
+  assert.ok(S.review({projectType:'garage'},pkg(8000.01)).warnings.some(w=>/over \$8,000/.test(w.message)));
+  assert.strictEqual(S.review({projectType:'garage'},pkg(15000)).blocks.length,0);
+  assert.ok(S.review({projectType:'garage'},pkg(15000.01)).blocks.some(b=>/over \$15,000/.test(b.message)));
   function flat(start){
     const settings=JSON.parse(JSON.stringify(E.defaults));
     settings.catalog.flatwork.sizeBands[0].starting=start;
@@ -458,8 +452,8 @@ check('blended and measured-total boundaries',()=>{
     const out=await record(job,'owner',staff);
     assert.strictEqual(out.res.status,200,JSON.stringify(out.res.body));
     assert.strictEqual(out.recorded,1);
-    assert.strictEqual(out.res.body.customer.totals.total,6250);
-    assert.notStrictEqual(out.res.body.customer.totals.total,4000+2250*450);
+    assert.strictEqual(out.res.body.customer.totals.total,4500+2250);
+    assert.notStrictEqual(out.res.body.customer.totals.total,4500+2250*450);
     const adj=out.res.body.customer.catalogAdjustments.find(l=>/flake/i.test(l.label));
     assert.strictEqual(adj.qty,1);
     assert.strictEqual(adj.total,2250);

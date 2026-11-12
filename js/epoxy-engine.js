@@ -10,11 +10,12 @@ const catalogDefaults={
   garage:{
     /* Empty default so the staff price-book string survives defaults-only merge. Not a price. */
     disclaimer:'',
-    /* Owner Nov 2026: 1-car matches the $2,000 minimum. 2-car and 3-car stay at the live package prices. */
+    /* Typical size the base fee covers. Base fee = selected tier's flake rate × this size. */
     packageSqft:{oneCar:250,twoCar:450,threeCar:650},
-    oneCarStarting:2000,
-    twoCarStarting:3150,
-    threeCarStarting:4900,
+    /* Regular reference only ($10 × typical size). The quote computes the base from the selected tier. */
+    oneCarStarting:2500,
+    twoCarStarting:4500,
+    threeCarStarting:6500,
     materialAdj:{solid:{oneCar:-750,twoCar:-1350,threeCar:-1950},flake:0,metallic:UNCONFIGURED,sealer:UNCONFIGURED,custom:UNCONFIGURED},
     topcoatAdj:{protective:0,none:0,premium:UNCONFIGURED},
     conditionAdj:{unknown:UNCONFIGURED,good:0,fair:UNCONFIGURED,poor:UNCONFIGURED,critical:UNCONFIGURED,sound:0,paint:UNCONFIGURED,adhesive:UNCONFIGURED},
@@ -210,23 +211,24 @@ function buildCatalogBreakdown(job,settings){
   let startingLabel='Starting price';
 
   if(type==='garage' && !garageUsesMeasured(job)){
-    const key=garageStartingKey(job.garagePackage);
-    const startRaw=key?cat.garage[key]:UNCONFIGURED;
     const pkgLabel=job.garagePackage==='1car'?'1-car garage package':job.garagePackage==='2car'?'2-car garage package':job.garagePackage==='3car'?'3-car garage package':'Garage package';
-    if(!isConfigured(startRaw)){
-      pending.push('Starting price needed — set '+pkgLabel+' starting price in Costs & pricing → Catalog packages.');
+    const typical=n(cat.garage.packageSqft&&cat.garage.packageSqft[pkgKey]);
+    const flakeRate=styleTierRate(settings,job,'flake');
+    let baseReady=false;
+    if(!(typical>0)||!(flakeRate>0)){
+      pending.push('Starting price needed — '+pkgLabel+' base fee is the selected flake tier rate × the typical size (250 / 450 / 650 sq ft).');
       startingConfigured=false;
     } else {
-      const start=Number(startRaw);
+      const start=r2(flakeRate*typical);
       startingTotal=start;
-      lines.push({kind:'starting',label:pkgLabel+' — base fee',description:'Base fee covers the typical '+((cat.garage.packageSqft&&cat.garage.packageSqft[pkgKey])||'')+' sq ft. Square feet above that use the selected tier rate.',qty:1,unit:'package',rate:start,total:start});
+      baseReady=true;
+      lines.push({kind:'starting',label:pkgLabel+' — base fee',description:'Flake tier rate $'+flakeRate.toFixed(2)+' × '+typical+' sq ft. Square feet above that use the selected system’s tier rate.',qty:1,unit:'package',rate:start,total:start});
     }
-    const typical=n(cat.garage.packageSqft&&cat.garage.packageSqft[pkgKey]);
     let measured=0;
     for(const a of (job.areas||[]))measured+=n(a.sqft);
     if(measured)measureSqft=measured;
     const overflow=typical>0&&measured>typical?r2(measured-typical):0;
-    if(overflow>0&&isConfigured(startRaw)){
+    if(overflow>0&&baseReady){
       const styleName=job.garageStyle||'flake';
       const rate=styleTierRate(settings,job,styleName);
       const amount=r2(overflow*rate);

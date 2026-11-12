@@ -67,9 +67,9 @@ set staff_settings =
       ),
       '{catalog,garage}',
       coalesce(p.staff_settings#>'{catalog,garage}', '{}'::jsonb) || jsonb_build_object(
-        'oneCarStarting', 2000,
-        'twoCarStarting', 3150,
-        'threeCarStarting', 4900,
+        'oneCarStarting', 2500,
+        'twoCarStarting', 4500,
+        'threeCarStarting', 6500,
         'packageSqft', jsonb_build_object('oneCar', 250, 'twoCar', 450, 'threeCar', 650),
         'materialAdj', coalesce(p.staff_settings#>'{catalog,garage,materialAdj}', '{}'::jsonb) || jsonb_build_object(
           'solid', jsonb_build_object('oneCar', -750, 'twoCar', -1350, 'threeCar', -1950),
