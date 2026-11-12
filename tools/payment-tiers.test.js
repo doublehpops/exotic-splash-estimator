@@ -26,7 +26,7 @@ for(const [tier,rates] of Object.entries(tiers)){
       const x=quote(floor(100,style,tier));
       const raw=100*rates[style];
       assert.strictEqual(x.selected.breakdown.finishRate,rates[style]);
-      assert.strictEqual(x.total,Math.max(raw,2000));
+      assert.strictEqual(x.total,Math.max(raw,style==='solid'?2750:2000));
       assert.strictEqual(x.selected.key,tier);
     });
   }
@@ -38,7 +38,7 @@ check('option 1 is bank transfer 50/50 and option 2 is 50/25/25',()=>{
   assert.strictEqual(opt1.selected.payMethod,'bank transfer');
   assert.deepStrictEqual(opt1.selected.payments.map(p=>p.pct),[50,50]);
   assert.deepStrictEqual(opt1.selected.payments.map(p=>p.label),['Booking','Final walkthrough']);
-  assert.deepStrictEqual(opt1.selected.payments.map(p=>p.amount),[1000,1000]);
+  assert.deepStrictEqual(opt1.selected.payments.map(p=>p.amount),[1375,1375]);
   assert.deepStrictEqual(opt2.selected.payments.map(p=>p.pct),[50,25,25]);
   assert.strictEqual(opt2.selected.payments[2].label,'Within 14 days');
   assert.strictEqual(opt2.selected.payments.reduce((s,p)=>s+p.amount,0),2000);
@@ -47,7 +47,7 @@ check('option 1 is bank transfer 50/50 and option 2 is 50/25/25',()=>{
 check('regular keeps job terms and does not add a 40 percent discount',()=>{
   const x=quote(floor(100,'solid','regular'));
   assert.strictEqual(x.selected.payments.length,0);
-  assert.strictEqual(x.total,2000);
+  assert.strictEqual(x.total,2750);
   assert.notStrictEqual(x.total,420);
 });
 
@@ -56,7 +56,7 @@ check('removal stays priced and no material surcharge is added',()=>{
   j.condition='paint';
   const x=quote(j);
   assert.strictEqual(x.lines.find(l=>/removal/i.test(l.label)).total,200);
-  assert.strictEqual(x.total,2000);
+  assert.strictEqual(x.total,2750);
   assert.strictEqual(x.lines.some(l=>/surcharge|upcharge/i.test(l.label)),false);
 });
 
@@ -119,13 +119,13 @@ function deps(store,profile,jobs){
   await checkAsync('employee request leaves the customer total unchanged',async()=>{
     const res=await Q.handleQuoteRequest({mode:'discount-request',job_id:JOB,amount:100,reason:'Synthetic courtesy',role:'owner'},ed,E);
     assert.strictEqual(res.status,200);
-    assert.strictEqual(res.body.customerTotal,2000);
+    assert.strictEqual(res.body.customerTotal,2750);
     assert.strictEqual(res.body.request.status,'pending');
     assert.strictEqual(res.body.request.amount,100);
     jobs[JOB].job_data.discountApprovalId=res.body.request.id;
     jobs[JOB].job_data.discount=100;
     const preview=await Q.handleQuoteRequest({mode:'preview',job_id:JOB,job_data:jobs[JOB].job_data,role:'owner'},ed,E);
-    assert.strictEqual(preview.body.staff.total,2000);
+    assert.strictEqual(preview.body.staff.total,2750);
     assert.strictEqual(preview.body.discountStatus,'pending');
   });
 
@@ -151,7 +151,7 @@ function deps(store,profile,jobs){
   await checkAsync('approved reduction is the customer total and a second record is rejected',async()=>{
     const first=await Q.handleQuoteRequest({mode:'record',job_id:JOB},ed,E);
     assert.strictEqual(first.status,200);
-    assert.strictEqual(first.body.customer.totals.total,1900);
+    assert.strictEqual(first.body.customer.totals.total,2650);
     const customerText=JSON.stringify(first.body.customer);
     assert.strictEqual(customerText.includes('ownerNote'),false);
     assert.strictEqual(customerText.includes('markup'),false);
@@ -161,7 +161,7 @@ function deps(store,profile,jobs){
     assert.strictEqual(replay.status,422);
     assert.strictEqual(replay.body.code,'replay');
     const again=await Q.handleQuoteRequest({mode:'preview',job_id:JOB,job_data:jobs[JOB].job_data},ed,E);
-    assert.strictEqual(again.body.staff.total,2000);
+    assert.strictEqual(again.body.staff.total,2750);
   });
 
   await checkAsync('a rejected request and a cross-estimate approval do not reduce price',async()=>{
@@ -172,7 +172,7 @@ function deps(store,profile,jobs){
     await Q.handleQuoteRequest({mode:'discount-decide',id,decision:'reject'},deps(fresh,owner,jobs),E);
     jobs[JOB].job_data.discountApprovalId=id;
     const rejected=await Q.handleQuoteRequest({mode:'preview',job_id:JOB,job_data:jobs[JOB].job_data},local,E);
-    assert.strictEqual(rejected.body.staff.total,2000);
+    assert.strictEqual(rejected.body.staff.total,2750);
     const otherJob=floor(100,'metallic','opt1');
     otherJob.id=OTHER;
     jobs[OTHER]={id:OTHER,version:1,job_data:otherJob};
@@ -198,7 +198,7 @@ function deps(store,profile,jobs){
     const fresh=serverStore();
     const local=deps(fresh,employee,jobs);
     jobs[JOB].job_data=floor(100,'solid','regular');
-    for(const body of [{amount:-5,reason:'no'},{amount:0,reason:'no'},{amount:2000,reason:'wipe'},{percent:100,reason:'wipe'},{amount:10,reason:''},{amount:10,percent:10,reason:'both'}]){
+    for(const body of [{amount:-5,reason:'no'},{amount:0,reason:'no'},{amount:2750,reason:'wipe'},{percent:100,reason:'wipe'},{amount:10,reason:''},{amount:10,percent:10,reason:'both'}]){
       const res=await Q.handleQuoteRequest(Object.assign({mode:'discount-request',job_id:JOB},body),local,E);
       assert.notStrictEqual(res.status,200,JSON.stringify(body));
     }
@@ -215,8 +215,8 @@ function deps(store,profile,jobs){
   });
 
   const shapes=[
-    ['chicago solid 100',100,'solid','Chicago, IL',2000],
-    ['phoenix solid 100',100,'solid','Phoenix, AZ',2000],
+    ['chicago solid 100',100,'solid','Chicago, IL',2750],
+    ['phoenix solid 100',100,'solid','Phoenix, AZ',2750],
     ['chicago flake 250',250,'flake','Chicago, IL',2500],
     ['dallas metallic 40',40,'metallic','Dallas, TX',2000]
   ];
