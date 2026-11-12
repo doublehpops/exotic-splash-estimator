@@ -209,8 +209,10 @@ check('an over-cap extra rate is not multiplied and the estimate lists the line'
   const j=floor(450,'flake');
   j.areas[0].prep={coatingRemoval:true};
   const x=E.calculate(j,s);
-  assert.strictEqual(x.quoteReady,false);
+  assert.strictEqual(x.quoteReady,true);
+  assert.strictEqual(x.total,4500);
   assert.ok(!x.lines.some(l=>l.label==='Coating removal'&&l.total===900*450));
+  assert.ok((x.unpricedLines||[]).some(r=>/Coating removal/.test(r)));
   const shown=floor(1000,'flake');
   shown.areas[0].prep={coatingRemoval:true};
   const snap=Q.customerSnapshot(E,shown,E.calculate(shown,E.defaults),E.defaults);

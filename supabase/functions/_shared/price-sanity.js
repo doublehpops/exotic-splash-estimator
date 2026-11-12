@@ -99,7 +99,6 @@ function collectBook(settings){
   const multi=settings&&settings.extras&&settings.extras.multiColor;
   const polyRates=[
     [settings&&settings.catalog&&settings.catalog.garage&&settings.catalog.garage.topcoatAdj&&settings.catalog.garage.topcoatAdj.premium,'Polyaspartic topcoat / sq ft'],
-    [settings&&settings.catalog&&settings.catalog.flatwork&&settings.catalog.flatwork.topcoatAdj&&settings.catalog.flatwork.topcoatAdj.premium,'Flatwork polyaspartic topcoat / sq ft'],
     [multi&&multi.metallicPerSqft,'Metallic 3–4 colors / sq ft'],
     [multi&&multi.customFlakePerSqft,'Custom flake blend / sq ft']
   ];
@@ -136,26 +135,6 @@ function guardSettings(settings){
     const hit=perSqftIssue(RATE_LABELS[key]||key,next.rates[key]);
     if(hit&&hit.level==='block')next.rates[key]=null;
   }
-  next.extras=next.extras||{};
-  for(const [key,label] of EXTRA_SQFT_KEYS){
-    if(!next.extras[key])continue;
-    const hit=perSqftIssue(label,next.extras[key].perSqft);
-    if(hit&&hit.level==='block'){next.extras[key].perSqft=0;next.extras[key].min=0;}
-  }
-  if(next.catalog&&next.catalog.garage&&next.catalog.garage.topcoatAdj){
-    const hit=perSqftIssue('Polyaspartic topcoat / sq ft',next.catalog.garage.topcoatAdj.premium);
-    if(hit&&hit.level==='block')next.catalog.garage.topcoatAdj.premium=null;
-  }
-  if(next.catalog&&next.catalog.flatwork&&next.catalog.flatwork.topcoatAdj){
-    const hit=perSqftIssue('Flatwork polyaspartic topcoat / sq ft',next.catalog.flatwork.topcoatAdj.premium);
-    if(hit&&hit.level==='block')next.catalog.flatwork.topcoatAdj.premium=null;
-  }
-  if(next.extras&&next.extras.multiColor){
-    const metal=perSqftIssue('Metallic 3–4 colors / sq ft',next.extras.multiColor.metallicPerSqft);
-    const flake=perSqftIssue('Custom flake blend / sq ft',next.extras.multiColor.customFlakePerSqft);
-    if(metal&&metal.level==='block')next.extras.multiColor.metallicPerSqft=null;
-    if(flake&&flake.level==='block')next.extras.multiColor.customFlakePerSqft=null;
-  }
   next.addOn=next.addOn||{};
   for(const key of ['low','high']){
     const label=key==='low'?'Standard add-in / sq ft':'Higher add-in / sq ft';
@@ -177,7 +156,9 @@ function guardSettings(settings){
   const cost=costIssues(settings);
   for(const hit of cost.blocks.concat(cost.warnings))found.warnings.push(Object.assign({},hit,{level:'warn'}));
   for(const hit of productIssues(settings))found.warnings.push(hit);
-  return {settings:next,blocks:found.blocks,warnings:found.warnings};
+  const addonLine=/Coating removal|Paint removal|Adhesive|Poor slab|Anti-slip|Polyaspartic topcoat \/ sq ft|Metallic 3–4 colors|Custom flake blend|add-in \/ sq ft/;
+  const keep=hit=>!addonLine.test(String(hit&&hit.line||'')+' '+String(hit&&hit.message||''));
+  return {settings:next,blocks:found.blocks.filter(keep),warnings:found.warnings.filter(keep)};
 }
 function minimumJobIssue(raw){
   if(raw===null||raw===undefined||raw==='')return null;

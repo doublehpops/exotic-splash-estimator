@@ -256,6 +256,10 @@ function addPolyLine(lines,unpriced,sqft,rawRate){
     return;
   }
   const rate=Number(rawRate);
+  if(rate>40){
+    unpriced.push('Polyaspartic topcoat: price is outside $0–$40 (owner: set it in Price book)');
+    return;
+  }
   const total=r2(sf*rate);
   if(!(total>0))return;
   lines.push({kind:'extra',label:'Polyaspartic topcoat',description:'$'+rate.toFixed(2)+' / sq ft',qty:sf,unit:'sq ft',rate,total});
@@ -277,6 +281,10 @@ function pushRateLine(rows,unpriced,label,sqft,rawRate){
     return;
   }
   const rate=Number(rawRate);
+  if(rate>40){
+    unpriced.push(label+': price is outside $0–$40 (owner: set it in Price book)');
+    return;
+  }
   if(!(rate>0))return;
   const total=r2(sf*rate);
   if(!(total>0))return;
@@ -543,6 +551,11 @@ function extraPriceReady(cfg){
 function pushSqftExtra(rows,cfg,sqft,label,minNote,unpriced){
   const sf=n(sqft);
   if(!(sf>0))return;
+  const rawRate=cfg&&cfg.perSqft;
+  if(isConfigured(rawRate)&&Number(rawRate)>40){
+    if(unpriced)unpriced.push(label+': price is outside $0–$40 (owner: set it in Price book)');
+    return;
+  }
   if(!extraPriceReady(cfg)){
     if(unpriced)unpriced.push(priceNotSet(label));
     return;
@@ -777,8 +790,7 @@ function buildCatalogBreakdown(job,settings){
         lines.push({kind:'starting',label:name+' — starting price',description:(band?band.label+' · ':'')+(sf?sf+' sq ft':'size noted')+(L&&W?' · '+L+'×'+W+' ft':''),qty:1,unit:'item',rate:start,total:start});
       }
       resolveAdj(cat.flatwork.materialAdj,it.style||'solid','Material / system ('+(it.style||'solid')+') — '+name,pending,adjustments,'',unpriced);
-      if((it.topcoat||'protective')==='premium')addPolyLine(adjustments,unpriced,sf,cat.flatwork.topcoatAdj&&cat.flatwork.topcoatAdj.premium);
-      else resolveAdj(cat.flatwork.topcoatAdj,it.topcoat||'protective',topcoatAdjLabel(it.topcoat||'protective')+' — '+name,pending,adjustments,'',unpriced);
+      resolveAdj(cat.flatwork.topcoatAdj,it.topcoat||'protective',(it.topcoat==='premium'?'Polyaspartic topcoat — '+name:topcoatAdjLabel(it.topcoat||'protective')+' — '+name),pending,adjustments,'',unpriced);
       const ck=it.condition||'unknown';
       noteUnknown(cat.flatwork.conditionAdj,ck,'',pending,notes,'Condition is Unknown for '+name+' — do not assume $0. Inspect or configure an explicit adjustment.',unpriced);
       if(ck==='critical')unpriced.push(priceNotSet('Critical condition — '+name));
