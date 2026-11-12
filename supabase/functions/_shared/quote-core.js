@@ -41,10 +41,23 @@ function buildSettings(E,staff,owner){
   return deepMergeSettings(E,Object.assign({},pick(staff||{},STAFF_SECTIONS),pick(owner||{},OWNER_SECTIONS)));
 }
 /** Employee browser settings: owner-only sections replaced by zeros (never real values). */
+function zeroCostValue(v){
+  if(typeof v==='number')return 0;
+  if(Array.isArray(v))return v.map(zeroCostValue);
+  if(v&&typeof v==='object'){
+    const o={};
+    for(const k of Object.keys(v)){
+      if(k==='status'||k==='note'||k==='label'){o[k]='';continue}
+      o[k]=zeroCostValue(v[k]);
+    }
+    return o;
+  }
+  return v;
+}
 function redactedStaffSettings(E,staff){
   const s=buildSettings(E,staff,{});
   for(const p of Object.values(s.products||{}))if(p&&typeof p==='object'){if('price' in p)p.price=0}
-  for(const k of Object.keys(s.costs||{}))if(typeof s.costs[k]==='number')s.costs[k]=0;
+  s.costs=zeroCostValue(s.costs||{});
   s._redacted=true;
   return s;
 }

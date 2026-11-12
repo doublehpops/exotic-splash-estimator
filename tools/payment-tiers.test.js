@@ -24,7 +24,9 @@ for(const [tier,rates] of Object.entries(tiers)){
   for(const style of ['solid','flake','metallic']){
     check(tier+' '+style+' is '+rates[style],()=>{
       const x=quote(floor(100,style,tier));
-      assert.strictEqual(x.total,100*rates[style]);
+      const raw=100*rates[style];
+      assert.strictEqual(x.selected.breakdown.finishRate,rates[style]);
+      assert.strictEqual(x.total,Math.max(raw,2000));
       assert.strictEqual(x.selected.key,tier);
     });
   }
@@ -36,16 +38,16 @@ check('option 1 is bank transfer 50/50 and option 2 is 50/25/25',()=>{
   assert.strictEqual(opt1.selected.payMethod,'bank transfer');
   assert.deepStrictEqual(opt1.selected.payments.map(p=>p.pct),[50,50]);
   assert.deepStrictEqual(opt1.selected.payments.map(p=>p.label),['Booking','Final walkthrough']);
-  assert.deepStrictEqual(opt1.selected.payments.map(p=>p.amount),[250,250]);
+  assert.deepStrictEqual(opt1.selected.payments.map(p=>p.amount),[1000,1000]);
   assert.deepStrictEqual(opt2.selected.payments.map(p=>p.pct),[50,25,25]);
   assert.strictEqual(opt2.selected.payments[2].label,'Within 14 days');
-  assert.strictEqual(opt2.selected.payments.reduce((s,p)=>s+p.amount,0),900);
+  assert.strictEqual(opt2.selected.payments.reduce((s,p)=>s+p.amount,0),2000);
 });
 
 check('regular keeps job terms and does not add a 40 percent discount',()=>{
   const x=quote(floor(100,'solid','regular'));
   assert.strictEqual(x.selected.payments.length,0);
-  assert.strictEqual(x.total,700);
+  assert.strictEqual(x.total,2000);
   assert.notStrictEqual(x.total,420);
 });
 
@@ -53,7 +55,8 @@ check('removal stays priced and no material surcharge is added',()=>{
   const j=floor(100,'solid','opt1');
   j.condition='paint';
   const x=quote(j);
-  assert.strictEqual(x.total,500+200);
+  assert.strictEqual(x.lines.find(l=>/removal/i.test(l.label)).total,200);
+  assert.strictEqual(x.total,2000);
   assert.strictEqual(x.lines.some(l=>/surcharge|upcharge/i.test(l.label)),false);
 });
 
@@ -62,9 +65,9 @@ check('typed discount does not change the total without a bound tier',()=>{
   j.discount=300;
   const unbound=quote(Object.assign({},j,{discountApproval:{ok:true,amount:300}}));
   const bound=quote(Object.assign({},j,{discountApproval:{ok:true,amount:300,tier:'opt2'}}));
-  assert.strictEqual(unbound.total,900);
-  assert.strictEqual(bound.total,600);
-  assert.strictEqual(bound.choices.regular.total,1000);
+  assert.strictEqual(unbound.total,2000);
+  assert.strictEqual(bound.total,1700);
+  assert.strictEqual(bound.choices.regular.total,2000);
 });
 check('a flatwork item with no dimensions stays pending instead of pricing as the smallest band',()=>{
   const s=JSON.parse(JSON.stringify(E.defaults));
@@ -83,7 +86,9 @@ check('a flatwork item with no dimensions stays pending instead of pricing as th
   it.length=2;it.width=2;
   const sized=E.calculate(j,s);
   assert.strictEqual(sized.quoteReady,true);
-  assert.strictEqual(sized.total,500);
+  assert.strictEqual(sized.lines.find(l=>l.kind==='starting').total,500);
+  assert.strictEqual(sized.minimum,1500);
+  assert.strictEqual(sized.total,2000);
   assert.strictEqual(E.flatworkBandForSqft(s.catalog,4).id,'small');
 });
 
@@ -114,13 +119,13 @@ function deps(store,profile,jobs){
   await checkAsync('employee request leaves the customer total unchanged',async()=>{
     const res=await Q.handleQuoteRequest({mode:'discount-request',job_id:JOB,amount:100,reason:'Synthetic courtesy',role:'owner'},ed,E);
     assert.strictEqual(res.status,200);
-    assert.strictEqual(res.body.customerTotal,700);
+    assert.strictEqual(res.body.customerTotal,2000);
     assert.strictEqual(res.body.request.status,'pending');
     assert.strictEqual(res.body.request.amount,100);
     jobs[JOB].job_data.discountApprovalId=res.body.request.id;
     jobs[JOB].job_data.discount=100;
     const preview=await Q.handleQuoteRequest({mode:'preview',job_id:JOB,job_data:jobs[JOB].job_data,role:'owner'},ed,E);
-    assert.strictEqual(preview.body.staff.total,700);
+    assert.strictEqual(preview.body.staff.total,2000);
     assert.strictEqual(preview.body.discountStatus,'pending');
   });
 
@@ -146,7 +151,7 @@ function deps(store,profile,jobs){
   await checkAsync('approved reduction is the customer total and a second record is rejected',async()=>{
     const first=await Q.handleQuoteRequest({mode:'record',job_id:JOB},ed,E);
     assert.strictEqual(first.status,200);
-    assert.strictEqual(first.body.customer.totals.total,600);
+    assert.strictEqual(first.body.customer.totals.total,1900);
     const customerText=JSON.stringify(first.body.customer);
     assert.strictEqual(customerText.includes('ownerNote'),false);
     assert.strictEqual(customerText.includes('markup'),false);
@@ -156,7 +161,7 @@ function deps(store,profile,jobs){
     assert.strictEqual(replay.status,422);
     assert.strictEqual(replay.body.code,'replay');
     const again=await Q.handleQuoteRequest({mode:'preview',job_id:JOB,job_data:jobs[JOB].job_data},ed,E);
-    assert.strictEqual(again.body.staff.total,700);
+    assert.strictEqual(again.body.staff.total,2000);
   });
 
   await checkAsync('a rejected request and a cross-estimate approval do not reduce price',async()=>{
@@ -167,12 +172,12 @@ function deps(store,profile,jobs){
     await Q.handleQuoteRequest({mode:'discount-decide',id,decision:'reject'},deps(fresh,owner,jobs),E);
     jobs[JOB].job_data.discountApprovalId=id;
     const rejected=await Q.handleQuoteRequest({mode:'preview',job_id:JOB,job_data:jobs[JOB].job_data},local,E);
-    assert.strictEqual(rejected.body.staff.total,700);
+    assert.strictEqual(rejected.body.staff.total,2000);
     const otherJob=floor(100,'metallic','opt1');
     otherJob.id=OTHER;
     jobs[OTHER]={id:OTHER,version:1,job_data:otherJob};
     const cross=await Q.handleQuoteRequest({mode:'preview',job_id:OTHER,job_data:Object.assign({},otherJob,{discountApprovalId:id,discount:150})},deps(fresh,employee,jobs),E);
-    assert.strictEqual(cross.body.staff.total,1100);
+    assert.strictEqual(cross.body.staff.total,2000);
   });
 
   await checkAsync('an edited estimate makes the approval stale',async()=>{
@@ -193,7 +198,7 @@ function deps(store,profile,jobs){
     const fresh=serverStore();
     const local=deps(fresh,employee,jobs);
     jobs[JOB].job_data=floor(100,'solid','regular');
-    for(const body of [{amount:-5,reason:'no'},{amount:0,reason:'no'},{amount:700,reason:'wipe'},{percent:100,reason:'wipe'},{amount:10,reason:''},{amount:10,percent:10,reason:'both'}]){
+    for(const body of [{amount:-5,reason:'no'},{amount:0,reason:'no'},{amount:2000,reason:'wipe'},{percent:100,reason:'wipe'},{amount:10,reason:''},{amount:10,percent:10,reason:'both'}]){
       const res=await Q.handleQuoteRequest(Object.assign({mode:'discount-request',job_id:JOB},body),local,E);
       assert.notStrictEqual(res.status,200,JSON.stringify(body));
     }
@@ -210,10 +215,10 @@ function deps(store,profile,jobs){
   });
 
   const shapes=[
-    ['chicago solid 100',100,'solid','Chicago, IL',700],
-    ['phoenix solid 100',100,'solid','Phoenix, AZ',700],
+    ['chicago solid 100',100,'solid','Chicago, IL',2000],
+    ['phoenix solid 100',100,'solid','Phoenix, AZ',2000],
     ['chicago flake 250',250,'flake','Chicago, IL',2500],
-    ['dallas metallic 40',40,'metallic','Dallas, TX',600]
+    ['dallas metallic 40',40,'metallic','Dallas, TX',2000]
   ];
   check('adopted regular tier across cities does not invent a local rate',()=>{
     for(const [name,sqft,style,city,total] of shapes){
@@ -232,22 +237,22 @@ function deps(store,profile,jobs){
     assert.strictEqual(regular.breakdown.finishAmount,18000);
     assert.strictEqual(opt1.breakdown.finishAmount,13200);
     assert.strictEqual(opt2.breakdown.finishAmount,15600);
-    assert.strictEqual(regular.breakdown.extrasAmount,10800);
+    assert.strictEqual(regular.breakdown.extrasAmount,0);
     for(const c of [regular,opt1,opt2]){
       assert.strictEqual(c.breakdown.reconciles,true);
       assert.strictEqual(c.paymentsReconcile,true);
       assert.strictEqual(c.total,c.breakdown.finishAmount+c.breakdown.extrasAmount);
       if(c.payments.length)assert.strictEqual(c.payments.reduce((sum,p)=>sum+p.amount,0),c.total);
     }
-    assert.strictEqual(regular.total,28800);
-    assert.strictEqual(opt1.total,24000);
-    assert.strictEqual(opt2.total,26400);
+    assert.strictEqual(regular.total,18000);
+    assert.strictEqual(opt1.total,13200);
+    assert.strictEqual(opt2.total,15600);
     assert.strictEqual(opt1.payments.length,2);
     assert.strictEqual(opt2.payments.length,3);
     const oldFinishOnlyPct=(18000-(6*1200))/18000*100;
     assert.strictEqual(oldFinishOnlyPct,60);
     assert.ok(Math.abs(opt1.savingsPct-oldFinishOnlyPct)>1);
-    assert.strictEqual(Math.round(opt1.savingsPct*100)/100,Math.round((4800/28800)*100*100)/100);
+    assert.strictEqual(Math.round(opt1.savingsPct*100)/100,Math.round((4800/18000)*100*100)/100);
     assert.notStrictEqual(Math.round(opt2.savingsPct),67);
   });
 
@@ -266,7 +271,7 @@ function deps(store,profile,jobs){
     },E);
     assert.strictEqual(res.status,200);
     const selected=res.body.staff.selected;
-    assert.strictEqual(selected.total,26400);
+    assert.strictEqual(selected.total,15600);
     assert.strictEqual(selected.breakdown.reconciles,true);
     assert.strictEqual(selected.paymentsReconcile,true);
     assert.strictEqual(selected.payments.length,3);

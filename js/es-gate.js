@@ -337,6 +337,7 @@ async function savePriceBook(){
   if(S){
     const found=S.bookIssues(G().state.settings);
     if(found.blocks.length){toast(found.blocks[0].message);return}
+    if(S.costIssues){const cost=S.costIssues(G().state.settings);if(cost.blocks.length){toast(cost.blocks[0].message+' The price book was not saved.');return}}
     if(found.warnings.length&&!G().perSqftAcked()){toast(found.warnings[0].message+' Tap Looks right, continue before saving.');return}
   }
   const reason=($('esPriceReason')||{}).value||'';

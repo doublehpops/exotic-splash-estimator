@@ -133,7 +133,77 @@ function guardSettings(settings){
       if(hit&&hit.level==='block')opt.rates[style]=null;
     }
   }
+  const minHit=minimumJobIssue(next.rates.minimumJob);
+  if(minHit){(minHit.level==='block'?found.blocks:found.warnings).push(minHit);if(minHit.level==='block')next.rates.minimumJob=0}
+  const cost=costIssues(settings);
+  for(const hit of cost.blocks.concat(cost.warnings))found.warnings.push(Object.assign({},hit,{level:'warn'}));
+  for(const hit of productIssues(settings))found.warnings.push(hit);
   return {settings:next,blocks:found.blocks,warnings:found.warnings};
+}
+function minimumJobIssue(raw){
+  if(raw===null||raw===undefined||raw==='')return null;
+  const v=Number(raw);
+  if(!Number.isFinite(v)||v<0||v>10000)return issue('block','minimum_job','Minimum job charge','Minimum job charge is '+money(v)+', outside $0–$10,000.');
+  if(v>5000)return issue('warn','minimum_job','Minimum job charge','Minimum job charge is '+money(v)+', over $5,000.');
+  return null;
+}
+function productIssues(settings){
+  const warnings=[];
+  const flake=settings&&settings.products&&settings.products.flake;
+  const size=Number(flake&&flake.size),price=Number(flake&&flake.price);
+  if(Number.isFinite(size)&&size>0&&Number.isFinite(price)){
+    const per=price/size;
+    if(per>10)warnings.push(issue('warn','flake_supplier','Decorative flakes','Flake supplier cost is $'+per.toFixed(2)+'/lb — market is about $2.70–$4.62/lb. Check the package size.'));
+  }
+  return warnings;
+}
+function costBound(blocks,warnings,label,raw,block,warn){
+  if(raw===null||raw===undefined||raw==='')return;
+  const v=Number(raw);
+  if(!Number.isFinite(v)||(block&&(v<block[0]||v>block[1]))){
+    blocks.push(issue('block','cost_input',label,label+' cost is '+(Number.isFinite(v)?v:raw)+', outside '+(block?block[0]+'–'+block[1]:'a number')+'.'));
+    return;
+  }
+  if(warn&&(v<warn[0]||v>warn[1]))warnings.push(issue('warn','cost_input',label,label+' cost is '+v+', outside the usual '+warn[0]+'–'+warn[1]+'.'));
+}
+function costIssues(settings){
+  const c=(settings&&settings.costs)||{};
+  const blocks=[],warnings=[];
+  costBound(blocks,warnings,'Loaded labor',c.labor,[10,150],[30,70]);
+  costBound(blocks,warnings,'Material waste',c.waste,[0,30],null);
+  costBound(blocks,warnings,'Materials purchase tax',c.purchaseTax,[0,15],null);
+  costBound(blocks,warnings,'Setup hours',c.setupHours,[0,60],null);
+  costBound(blocks,warnings,'Flat overhead',c.overhead,[0,10000],null);
+  costBound(blocks,warnings,'Markup',c.markup,[0,300],null);
+  const markup=Number(c.markup);
+  if(Number.isFinite(markup)&&markup>=0&&markup<=300&&markup<33.33)warnings.push(issue('warn','cost_input','Markup','Markup cost '+markup+'% is below 33.33% (under a 25% margin).'));
+  costBound(blocks,warnings,'Target margin',c.targetMargin,[0,80],null);
+  const tm=Number(c.targetMargin);
+  if(Number.isFinite(tm)&&tm>=0&&tm<=80&&tm<25)warnings.push(issue('warn','cost_input','Target margin','Target margin cost '+tm+'% is under the 25% minimum margin.'));
+  let rate=Number(c.overheadPerHour);
+  const lines=Array.isArray(c.overheadLines)?c.overheadLines:[];
+  const hours=Number(c.billableHoursPerMonth);
+  if(lines.length&&Number.isFinite(hours)&&hours>0){
+    const monthly=lines.reduce((s,l)=>s+(Number(l&&l.monthly)||0),0);
+    rate=monthly/hours;
+  }
+  if(lines.length||(c.overheadPerHour!=null&&c.overheadPerHour!==''))costBound(blocks,warnings,'Overhead per hour',rate,[0,100],null);
+  return {blocks,warnings};
+}
+function garageStartWarnings(settings){
+  const g=(settings&&settings.catalog&&settings.catalog.garage)||{};
+  const flake=Number(settings&&settings.rates&&settings.rates.flake);
+  const sq=g.packageSqft||{oneCar:250,twoCar:450,threeCar:650};
+  const rows=[['oneCar','1-car',g.oneCarStarting],['twoCar','2-car',g.twoCarStarting],['threeCar','3-car',g.threeCarStarting]];
+  const out=[];
+  if(!Number.isFinite(flake))return out;
+  for(const [key,label,start] of rows){
+    const sf=Number(sq[key]);
+    if(!Number.isFinite(Number(start))||!(sf>0))continue;
+    const bench=flake*sf;
+    if(Number(start)<bench)out.push(issue('warn','garage_start',label,'Garage '+label+' starting price '+money(start)+' is below the approved Regular flake rate × '+sf+' sf ('+money(bench)+') — check cost/margin.'));
+  }
+  return out;
 }
 function addOnAmountIssue(label,raw){
   if(raw===null||raw===undefined||raw==='')return null;
@@ -155,15 +225,24 @@ function collectCatalog(settings){
       const map=g[mapKey];
       if(!map||typeof map!=='object')continue;
       for(const key of Object.keys(map)){
-        const hit=addOnAmountIssue('Catalog '+group+' '+mapKey+' '+key,map[key]);
-        if(hit)(hit.level==='block'?blocks:warnings).push(hit);
+        walkAddOnAmounts('Catalog '+group+' '+mapKey+' '+key,map[key],blocks,warnings);
       }
     }
   }
   return {blocks,warnings};
 }
+function walkAddOnAmounts(label,raw,blocks,warnings){
+  if(raw&&typeof raw==='object'&&!Array.isArray(raw)){
+    for(const key of Object.keys(raw))walkAddOnAmounts(label+' '+key,raw[key],blocks,warnings);
+    return;
+  }
+  const hit=addOnAmountIssue(label,raw);
+  if(hit)(hit.level==='block'?blocks:warnings).push(hit);
+}
 function bookIssues(settings){
   const a=collectBook(settings),b=collectCatalog(settings);
+  const minHit=minimumJobIssue(settings&&settings.rates&&settings.rates.minimumJob);
+  if(minHit)(minHit.level==='block'?a.blocks:a.warnings).push(minHit);
   return {blocks:a.blocks.concat(b.blocks),warnings:a.warnings.concat(b.warnings)};
 }
 function areaSqftOf(job){
@@ -271,6 +350,7 @@ function quoteStop(result,opts){
 }
 return {
   PER_SQFT_RATE_KEYS,PER_SQFT_MAX,PER_SQFT_WARN,DEPTH_MAX,SQFT_WARN,SQFT_BLOCK,ADDON_WARN,ADDON_BLOCK,
-  customRateProblem,capDepth,guardSettings,bookIssues,review,fingerprint,quoteStop,money
+  customRateProblem,capDepth,guardSettings,bookIssues,review,fingerprint,quoteStop,money,
+  productIssues,costIssues,garageStartWarnings,minimumJobIssue
 };
 });
