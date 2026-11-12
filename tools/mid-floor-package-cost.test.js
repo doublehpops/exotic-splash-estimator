@@ -11,7 +11,6 @@ function check(name,fn){try{fn();console.log('ok',name);}catch(e){failed++;conso
 async function checkAsync(name,fn){try{await fn();console.log('ok',name);}catch(e){failed++;console.error('FAIL',name,e&&e.stack||e);}}
 
 const RATES={opt1:5,opt2:6,regular:7};
-const PKG={opt1:3500,opt2:3800,regular:4450};
 const SIZES=[['1car',250],['2car',450],['3car',650]];
 const STYLES=['solid','flake','metallic'];
 const TIERS=['opt1','opt2','regular'];
@@ -38,9 +37,7 @@ function garage(pkg,style,tier,sqft){
 }
 function expectedSolid(sqft,tier){
   const rate=sqft*RATES[tier];
-  let floorMin=0;
-  if(sqft<400)floorMin=2750;
-  else if(sqft<500)floorMin=PKG[tier];
+  const floorMin=sqft<500?2750:0;
   return Math.max(rate,floorMin,2000);
 }
 function badKeys(value,at,hits){
@@ -52,13 +49,23 @@ function badKeys(value,at,hits){
   }
 }
 
-check('399, 400, 450, 499, and 500 sq ft solid floors follow the band in every tier',()=>{
+check('399, 450, 499, 500, and 501 sq ft solid floors keep the $2,750 minimum and do not cliff',()=>{
+  const points=[399,450,499,500,501];
+  const series={
+    opt1:[2750,2750,2750,2500,2505],
+    opt2:[2750,2750,2994,3000,3006],
+    regular:[2793,3150,3493,3500,3507]
+  };
   for(const tier of TIERS){
-    for(const sqft of [399,400,450,499,500]){
+    const totals=[];
+    for(const sqft of points){
       const j=floor(sqft,'solid',tier);
       const x=E.calculate(j,E.defaults);
       const want=expectedSolid(sqft,tier);
+      totals.push(x.total);
       assert.strictEqual(x.total,want,tier+' '+sqft);
+      assert.ok(x.total>=2750||sqft>=500,tier+' '+sqft+' minimum');
+      assert.notStrictEqual(x.total,tier==='opt1'?3500:tier==='opt2'?3800:4450,tier+' '+sqft+' package');
       assert.strictEqual(x.choices.opt1.total,expectedSolid(sqft,'opt1'),tier+' choice opt1 '+sqft);
       assert.strictEqual(x.choices.opt2.total,expectedSolid(sqft,'opt2'),tier+' choice opt2 '+sqft);
       assert.strictEqual(x.choices.regular.total,expectedSolid(sqft,'regular'),tier+' choice regular '+sqft);
@@ -71,13 +78,31 @@ check('399, 400, 450, 499, and 500 sq ft solid floors follow the band in every t
         assert.strictEqual(x.minimumLabel,'',tier+' '+sqft);
       }
     }
+    assert.deepStrictEqual(totals,series[tier],tier);
+    for(let i=1;i<totals.length;i++){
+      if(tier==='opt1'&&points[i]===500){
+        assert.strictEqual(totals[i-1],2750);
+        assert.strictEqual(totals[i],2500);
+        continue;
+      }
+      assert.ok(totals[i]>=totals[i-1],tier+' '+points[i-1]+' to '+points[i]);
+    }
     assert.strictEqual(E.calculate(floor(450,'flake',tier),E.defaults).total,450*(tier==='opt1'?8:tier==='opt2'?9:10));
+  }
+  const live=Q.buildSettings(E,{rates:{smallSolidFloor:{maxSqft:500,min:2750}}},{});
+  const storedBand=JSON.parse(JSON.stringify(E.defaults));
+  storedBand.rates.smallSolidFloor.bands=[{minSqft:400,maxSqft:500,source:'package',system:'solid',size:'2'}];
+  for(const tier of TIERS){
+    for(const sqft of points){
+      assert.strictEqual(E.calculate(floor(sqft,'solid',tier),live).total,expectedSolid(sqft,tier),tier+' live '+sqft);
+      assert.strictEqual(E.calculate(floor(sqft,'solid',tier),storedBand).total,expectedSolid(sqft,tier),tier+' band '+sqft);
+    }
   }
   const j=floor(450,'solid','opt1');
   const x=E.calculate(j,E.defaults);
   const doc=Q.customerSnapshot(E,j,x,E.defaults);
   const staff=Q.staffSnapshotSafe(E,j,x,E.defaults);
-  assert.strictEqual(doc.totals.total,3500);
+  assert.strictEqual(doc.totals.total,2750);
   assert.strictEqual(doc.totals.minimumLabel,'Small solid floor minimum');
   assert.ok(!doc.lines.some(l=>/2-car|twoCar|package price/i.test(String(l.label)+String(l.description))));
   const html=V.render({estimate:doc});
@@ -88,27 +113,27 @@ check('399, 400, 450, 499, and 500 sq ft solid floors follow the band in every t
   assert.deepStrictEqual(hits,[]);
 });
 
-check('the mid band amount and its package source are configurable',()=>{
+check('a saved package band does not replace the small solid floor',()=>{
   const book=JSON.parse(JSON.stringify(E.defaults));
-  book.rates.smallSolidFloor.bands[0].min=4100;
-  assert.strictEqual(E.calculate(floor(450,'solid','regular'),book).total,4100);
-  assert.strictEqual(E.calculate(floor(400,'solid','opt1'),book).total,4100);
+  book.rates.smallSolidFloor.bands=[{minSqft:400,maxSqft:500,source:'package',system:'solid',size:'2',min:4100}];
+  assert.strictEqual(E.calculate(floor(450,'solid','regular'),book).total,3150);
+  assert.strictEqual(E.calculate(floor(400,'solid','opt1'),book).total,2750);
   assert.strictEqual(E.calculate(floor(399,'solid','opt1'),book).total,2750);
-  delete book.rates.smallSolidFloor.bands[0].min;
   book.garage.packages.opt2.solid.twoCar=3900;
-  assert.strictEqual(E.calculate(floor(450,'solid','opt2'),book).total,3900);
+  assert.strictEqual(E.calculate(floor(450,'solid','opt2'),book).total,2750);
   const aliased=Q.buildSettings(E,{garage:{packages:{opt1:{solid:{'2':3600}}}}},{});
-  assert.strictEqual(E.calculate(floor(420,'solid','opt1'),aliased).total,3600);
+  assert.strictEqual(E.calculate(floor(420,'solid','opt1'),aliased).total,2750);
+  assert.strictEqual(aliased.garage.packages.opt1.solid.twoCar,3600);
   const canonical=Q.buildSettings(E,{garage:{packages:{opt1:{solid:{twoCar:3400,'2':3600}}}}},{});
-  assert.strictEqual(E.calculate(floor(450,'solid','opt1'),canonical).total,3400);
+  assert.strictEqual(E.calculate(floor(450,'solid','opt1'),canonical).total,2750);
   assert.strictEqual(canonical.garage.packages.opt1.solid.twoCar,3400);
   const legacy=JSON.parse(JSON.stringify(E.defaults));
   legacy.rates.smallSolidFloor={maxSqft:500,min:3000};
   assert.strictEqual(E.calculate(floor(450,'solid','opt1'),legacy).total,3000);
   const unmigrated=Q.buildSettings(E,{rates:{smallSolidFloor:{maxSqft:500,min:2750}}},{});
-  assert.ok(Array.isArray(unmigrated.rates.smallSolidFloor.bands)&&unmigrated.rates.smallSolidFloor.bands.length>0);
+  assert.ok(!unmigrated.rates.smallSolidFloor.bands);
   assert.strictEqual(E.calculate(floor(399,'solid','opt1'),unmigrated).total,2750);
-  assert.strictEqual(E.calculate(floor(400,'solid','opt1'),unmigrated).total,3500);
+  assert.strictEqual(E.calculate(floor(450,'solid','opt1'),unmigrated).total,2750);
   assert.strictEqual(E.calculate(floor(500,'solid','opt1'),unmigrated).total,2500);
 });
 
@@ -159,21 +184,21 @@ check('garage package selling prices stay put and owner margins are not 100 perc
   assert.ok(Math.abs(shortX.cost-full.cost)<0.02);
 });
 
-check('mid solid floor migration creates parent objects and is not a destructive apply',()=>{
+check('small solid floor migration does not install the package band',()=>{
   const sql=fs.readFileSync(path.join(__dirname,'..','supabase/migrations/20261112180000_mid_solid_floor_band.sql'),'utf8');
   assert.ok(sql.includes('Not applied'));
   assert.ok(!/\bdelete\s+from\b/i.test(sql));
   assert.ok(!/\bdrop\s+table\b/i.test(sql));
   assert.ok(!/\btruncate\b/i.test(sql));
   assert.ok(sql.indexOf("'{rates}'")<sql.indexOf("'{rates,smallSolidFloor}'"));
-  assert.ok(sql.indexOf("'{rates,smallSolidFloor}'")<sql.indexOf("'{rates,smallSolidFloor,min}'"));
-  assert.ok(sql.indexOf("'{rates,smallSolidFloor}'")<sql.indexOf("'{rates,smallSolidFloor,maxSqft}'"));
-  assert.ok(sql.indexOf("'{rates,smallSolidFloor}'")<sql.indexOf("'{rates,smallSolidFloor,bands}'"));
+  assert.ok(sql.indexOf("'{rates,smallSolidFloor}'")<sql.indexOf("'{min}'"));
   assert.ok(sql.includes("set_config('es.price_book_version_assigned', 'on', true)"));
   assert.ok(sql.includes('version = version + 1'));
   assert.ok(sql.includes('where id = 1'));
-  assert.ok(sql.includes("'source', 'package'"));
-  assert.ok(sql.includes("'size', '2'"));
+  assert.ok(sql.includes('staff_settings is distinct from v_staff'));
+  assert.ok(!sql.includes("'{rates,smallSolidFloor,bands}', jsonb_build_array"));
+  assert.ok(sql.includes('v_removed := true'));
+  assert.ok(!sql.includes("'source', 'package'"));
   assert.ok(!/3500|3800|4450/.test(sql));
 });
 

@@ -29,26 +29,26 @@ const TABLE={
 };
 const SIZES=[['1car',0],['2car',1],['3car',2]];
 
-check('small solid floor is per job and applies in every tier under 400 sq ft',()=>{
-  const pkg={opt1:3500,opt2:3800,regular:4450};
+check('small solid floor is per job and applies in every tier under 500 sq ft',()=>{
   for(const tier of ['opt1','opt2','regular']){
     const small=E.calculate(floor(250,'solid',tier),E.defaults);
     assert.strictEqual(small.total,2750,tier+' 250');
     assert.strictEqual(small.minimumLabel,'Small solid floor minimum');
     const mid=E.calculate(floor(450,'solid',tier),E.defaults);
     const raw=450*(tier==='opt1'?5:tier==='opt2'?6:7);
-    assert.strictEqual(mid.total,Math.max(raw,pkg[tier]),tier+' 450');
-    assert.strictEqual(mid.minimumLabel,'Small solid floor minimum');
+    assert.strictEqual(mid.total,Math.max(raw,2750),tier+' 450');
+    if(raw<2750)assert.strictEqual(mid.minimumLabel,'Small solid floor minimum');
+    else assert.strictEqual(mid.minimumLabel,'');
   }
-  assert.strictEqual(E.calculate(floor(450,'solid','regular'),E.defaults).total,4450);
-  assert.strictEqual(E.calculate(floor(499,'solid','opt1'),E.defaults).total,3500);
+  assert.strictEqual(E.calculate(floor(450,'solid','regular'),E.defaults).total,3150);
+  assert.strictEqual(E.calculate(floor(499,'solid','opt1'),E.defaults).total,2750);
   assert.strictEqual(E.calculate(floor(500,'solid','opt1'),E.defaults).total,2500);
   assert.strictEqual(E.calculate(floor(250,'flake','opt1'),E.defaults).total,2000);
   const parts=floor(0,'solid','opt1');
   parts.areas=[{...E.newArea(),sqft:200,style:'solid',coats:1},{...E.newArea(),sqft:200,style:'solid',coats:1}];
   const both=E.calculate(parts,E.defaults);
   assert.strictEqual(E.solidSystemSqft(parts,E.defaults),400);
-  assert.strictEqual(both.total,3500);
+  assert.strictEqual(both.total,2750);
   parts.areas[1].sqft=300;parts.areas[0].sqft=300;
   assert.strictEqual(E.calculate(parts,E.defaults).total,3000);
   const book=JSON.parse(JSON.stringify(E.defaults));
@@ -89,7 +89,7 @@ check('without the package table the flake base and solid credit still apply',()
   assert.strictEqual(x.lines.find(l=>l.kind==='starting').total,3600);
   assert.strictEqual(x.lines.find(l=>/solid/.test(l.label)).total,-1350);
   assert.strictEqual(x.minimumLabel,'Small solid floor minimum');
-  assert.strictEqual(x.total,3500);
+  assert.strictEqual(x.total,2750);
   const met=garage('2car','metallic','regular');
   const pending=E.calculate(met,s);
   assert.strictEqual(pending.quoteReady,true);

@@ -60,7 +60,7 @@ const garagePackageDefaults={packages:{
   opt2:{solid:{oneCar:2850,twoCar:3800,threeCar:4800},flake:{oneCar:3500,twoCar:4950,threeCar:6450},metallic:{oneCar:4150,twoCar:6150,threeCar:8100}},
   regular:{solid:{oneCar:3300,twoCar:4450,threeCar:5600},flake:{oneCar:3900,twoCar:5500,threeCar:7200},metallic:{oneCar:4750,twoCar:7100,threeCar:9350}}
 }};
-const defaults={business:{name:'Exotic Splash Epoxy LLC',address:'211 W. Wacker Drive, Ste 120, Chicago, IL 60606',phone:'331-315-5738',email:'',crews:[]},products:{primer:{label:'Epoxy primer',size:3,price:210,coverage:250,unit:'gal'},base:{label:'Colored epoxy',size:3,price:210,coverage:150,unit:'gal'},white:{label:'White epoxy',size:3,price:225,coverage:150,unit:'gal'},metal:{label:'Metallic clear epoxy',size:3,price:270,coverage:40,unit:'gal'},pigment:{label:'Metallic pigment',size:1,price:35,coverage:200,unit:'pack'},sealer:{label:'Clear base sealer',size:1,price:80,coverage:200,unit:'gal'},top:{label:'Protective topcoat',size:1,price:120,coverage:220,unit:'gal'},flake:{label:'Decorative flakes (40 lb box)',size:40,price:108,coverage:0,unit:'lb'},level:{label:'Self-leveling cement, 50 lb',size:1,price:75,coverage:25,unit:'bag'},levelPrimer:{label:'Self-leveling primer',size:1,price:50,coverage:120,unit:'gal'},patch:{label:'Concrete patch kit',size:1,price:75,coverage:0,unit:'kit'},grip:{label:'Traction additive',size:1,price:65,coverage:1200,unit:'pack'},moisture:{label:'Moisture-control primer',size:3,price:330,coverage:100,unit:'gal'}},rates:{solid:7,flake:10,metallic:15,sealer:3,level:6,removal:2,patch:150,moisture:4,extraCoat:1.5,mediumFlakeExtra:0.5,fullFlakeExtra:1,minimumJob:2000,minimumFloorsDiscount:false,smallSolidFloor:{maxSqft:400,min:2750,bands:[{minSqft:400,maxSqft:500,source:'package',system:'solid',size:'2'}]}},costs:{waste:10,labor:42.5,prepProduction:60,coatProduction:120,levelProduction:40,removalProduction:40,patchHours:1,setupHours:13,rentalDay:250,tooling:250,supplies:280,dust:100,disposal:150,mile:0.85,overhead:0,contingency:5,purchaseTax:10.5,markup:42.86,targetMargin:30,minMargin:25,minimum:0,grindProduction:75,baseProduction:200,flakeProduction:250,topProduction:200,metallicProduction:100,primerPass:false,materialPerSqft:{solid:1.26,flake:2.25,metallic:2.72},billableHoursPerMonth:448,allowancesInOverhead:true,overheadLines:OVERHEAD_LINES.map(x=>({...x}))},notes:'Our quoted price covers the scope described. If you receive a lower written estimate for comparable work, materials, preparation, and finish, share it with us. Where feasible, we will try to match the price or beat it by $1,000, subject to our review and written confirmation. The quoted total remains in effect until a revised written estimate is issued.',pricingOptions:{opt1:{label:'Option 1 — Bank transfer',short:'Option 1 · Bank transfer',payMethod:'bank transfer',rates:{solid:5,flake:8,metallic:11},schedule:[{pct:50,label:'Booking'},{pct:50,label:'Final walkthrough'}]},opt2:{label:'Option 2 — Scheduled payments',short:'Option 2 · 50 / 25 / 25',payMethod:'scheduled',rates:{solid:6,flake:9,metallic:13},schedule:[{pct:50,label:'Booking'},{pct:25,label:'Upon project completion'},{pct:25,label:'Within 14 days'}]}},discountApproval:{enforce:true},addOn:{label:'Standard property / trip add-in',low:0,high:0,enabled:false},approvedAdjustment:{mode:'amount',amount:0,pct:0},catalog:catalogDefaults,garage:garagePackageDefaults,extras:{
+const defaults={business:{name:'Exotic Splash Epoxy LLC',address:'211 W. Wacker Drive, Ste 120, Chicago, IL 60606',phone:'331-315-5738',email:'',crews:[]},products:{primer:{label:'Epoxy primer',size:3,price:210,coverage:250,unit:'gal'},base:{label:'Colored epoxy',size:3,price:210,coverage:150,unit:'gal'},white:{label:'White epoxy',size:3,price:225,coverage:150,unit:'gal'},metal:{label:'Metallic clear epoxy',size:3,price:270,coverage:40,unit:'gal'},pigment:{label:'Metallic pigment',size:1,price:35,coverage:200,unit:'pack'},sealer:{label:'Clear base sealer',size:1,price:80,coverage:200,unit:'gal'},top:{label:'Protective topcoat',size:1,price:120,coverage:220,unit:'gal'},flake:{label:'Decorative flakes (40 lb box)',size:40,price:108,coverage:0,unit:'lb'},level:{label:'Self-leveling cement, 50 lb',size:1,price:75,coverage:25,unit:'bag'},levelPrimer:{label:'Self-leveling primer',size:1,price:50,coverage:120,unit:'gal'},patch:{label:'Concrete patch kit',size:1,price:75,coverage:0,unit:'kit'},grip:{label:'Traction additive',size:1,price:65,coverage:1200,unit:'pack'},moisture:{label:'Moisture-control primer',size:3,price:330,coverage:100,unit:'gal'}},rates:{solid:7,flake:10,metallic:15,sealer:3,level:6,removal:2,patch:150,moisture:4,extraCoat:1.5,mediumFlakeExtra:0.5,fullFlakeExtra:1,minimumJob:2000,minimumFloorsDiscount:false,smallSolidFloor:{maxSqft:500,min:2750}},costs:{waste:10,labor:42.5,prepProduction:60,coatProduction:120,levelProduction:40,removalProduction:40,patchHours:1,setupHours:13,rentalDay:250,tooling:250,supplies:280,dust:100,disposal:150,mile:0.85,overhead:0,contingency:5,purchaseTax:10.5,markup:42.86,targetMargin:30,minMargin:25,minimum:0,grindProduction:75,baseProduction:200,flakeProduction:250,topProduction:200,metallicProduction:100,primerPass:false,materialPerSqft:{solid:1.26,flake:2.25,metallic:2.72},billableHoursPerMonth:448,allowancesInOverhead:true,overheadLines:OVERHEAD_LINES.map(x=>({...x}))},notes:'Our quoted price covers the scope described. If you receive a lower written estimate for comparable work, materials, preparation, and finish, share it with us. Where feasible, we will try to match the price or beat it by $1,000, subject to our review and written confirmation. The quoted total remains in effect until a revised written estimate is issued.',pricingOptions:{opt1:{label:'Option 1 — Bank transfer',short:'Option 1 · Bank transfer',payMethod:'bank transfer',rates:{solid:5,flake:8,metallic:11},schedule:[{pct:50,label:'Booking'},{pct:50,label:'Final walkthrough'}]},opt2:{label:'Option 2 — Scheduled payments',short:'Option 2 · 50 / 25 / 25',payMethod:'scheduled',rates:{solid:6,flake:9,metallic:13},schedule:[{pct:50,label:'Booking'},{pct:25,label:'Upon project completion'},{pct:25,label:'Within 14 days'}]}},discountApproval:{enforce:true},addOn:{label:'Standard property / trip add-in',low:0,high:0,enabled:false},approvedAdjustment:{mode:'amount',amount:0,pct:0},catalog:catalogDefaults,garage:garagePackageDefaults,extras:{
   crackRepair:{flat:250,includedLf:10,perLf:12},
   coatingRemoval:{perSqft:1.5,min:650},
   paintRemoval:{perSqft:1.25,min:250},
@@ -340,15 +340,7 @@ function smallSolidSpec(settings){
   const d=defaults.rates.smallSolidFloor;
   const raw=settings&&settings.rates&&settings.rates.smallSolidFloor;
   const src=raw&&typeof raw==='object'&&!Array.isArray(raw)?raw:{};
-  /* A saved floor object with no bands keeps the single floor. Missing settings use the default band. */
-  const bands=Array.isArray(src.bands)?src.bands:(raw?[]:(Array.isArray(d.bands)?d.bands:[]));
-  return {maxSqft:cfgNum(src.maxSqft,d.maxSqft),min:cfgNum(src.min,d.min),bands};
-}
-function packageSizeKey(size){
-  const s=String(size==null?'2':size);
-  if(s==='1'||s==='1car'||s==='one'||s==='oneCar')return 'oneCar';
-  if(s==='3'||s==='3car'||s==='three'||s==='threeCar')return 'threeCar';
-  return 'twoCar';
+  return {maxSqft:cfgNum(src.maxSqft,d.maxSqft),min:cfgNum(src.min,d.min)};
 }
 /* Copy 1/2/3 size aliases onto oneCar/twoCar/threeCar when the canonical key is blank. */
 function normalizeStaffPackages(raw){
@@ -372,30 +364,6 @@ function normalizeStaffPackages(raw){
     }
   }
   return raw;
-}
-function packageCellAmount(settings,tier,system,sizeKey){
-  const priceTier=tier==='opt1'||tier==='opt2'||tier==='regular'?tier:'regular';
-  const listed=packageTablePrice(settings,{priceOption:priceTier,garageStyle:system},sizeKey);
-  if(listed!=null)return listed>0?listed:0;
-  const table=garagePackageDefaults.packages[priceTier]||garagePackageDefaults.packages.regular;
-  const cell=table&&table[system]&&table[system][sizeKey];
-  return isConfigured(cell)&&Number(cell)>0?Number(cell):0;
-}
-function bandAmount(settings,band,tier){
-  if(!band||typeof band!=='object')return 0;
-  if(isConfigured(band.min)&&Number(band.min)>0)return Number(band.min);
-  if(isConfigured(band.amount)&&Number(band.amount)>0)return Number(band.amount);
-  if(band.source&&band.source!=='package'&&band.source!=='garagePackage')return 0;
-  const system=band.system||'solid';
-  const sizeKey=packageSizeKey(band.size!=null?band.size:band.packageSize);
-  return packageCellAmount(settings,tier,system,sizeKey);
-}
-function inSqftBand(sf,band){
-  const lo=Number(band&&band.minSqft);
-  const hi=Number(band&&band.maxSqft);
-  if(!Number.isFinite(lo)||sf<lo)return false;
-  if(Number.isFinite(hi)&&sf>=hi)return false;
-  return true;
 }
 function packageTypicalSqft(job,settings){
   const key=garagePkgKey(job);
@@ -437,20 +405,12 @@ function solidSystemSqft(job,settings){
   }
   return 0;
 }
-/* Under the small ceiling: the flat small-solid minimum. A configured band owns its range and looks up that tier's package price when it has no amount. */
+/* Under the ceiling, the flat small-solid minimum. The per-sqft price wins when it is higher. A stored mid-size band is not a package price. */
 function smallSolidFloorAmount(settings,job,tier){
   if(job&&job.method&&job.method!=='rates')return 0;
   const spec=smallSolidSpec(settings);
   const sf=solidSystemSqft(job,settings);
   if(!(sf>0))return 0;
-  const priceTier=tier||(job&&job.priceOption)||'regular';
-  let bandBest=0,bandMatched=false;
-  for(const band of spec.bands){
-    if(!inSqftBand(sf,band))continue;
-    bandMatched=true;
-    bandBest=Math.max(bandBest,bandAmount(settings,band,priceTier));
-  }
-  if(bandMatched&&bandBest>0)return bandBest;
   if(spec.maxSqft>0&&spec.min>0&&sf<spec.maxSqft)return spec.min;
   return 0;
 }

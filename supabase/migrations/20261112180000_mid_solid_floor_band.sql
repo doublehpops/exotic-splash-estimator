@@ -1,30 +1,31 @@
--- Mid-size solid floor band.
+-- Small solid floor ceiling.
 -- Not applied by the pull request that adds this file. No rows are removed.
 --
--- Solid sq ft under 400 keeps the small solid floor minimum.
--- From 400 sq ft up to (not including) 500 sq ft, the minimum is the selected
--- tier's 2-car solid package price when the band has no explicit amount.
--- 500 sq ft and above are unchanged. The quote shows one minimum line.
+-- Solid sq ft under 500 uses the small-solid minimum (2,750 when that
+-- amount is missing), or the per-sqft price when that is higher.
+-- This does not install a 400–499 band, and it does not price that range
+-- from the 2-car solid package.
+--
+-- If an earlier draft stored that package band and lowered the ceiling to
+-- 400, this removes that band and puts the ceiling back to 500. Any other
+-- band the owner saved is kept. A ceiling other than that draft's 400 is
+-- left alone.
 --
 -- jsonb_set creates only the last key of a path, so rates and
--- rates.smallSolidFloor are created before the band is written.
+-- rates.smallSolidFloor are created before min or maxSqft is written.
 --
--- price_book.version increments by 1 in this statement. The version trigger,
--- if it is already installed, is told not to increment a second time.
--- A second run does not replace a band the owner already saved, and it does
--- not change a small-floor ceiling other than the previous 500 sq ft default.
+-- price_book.version increments by 1 only when staff_settings changes.
+-- The version trigger, if it is already installed, is told not to increment
+-- a second time.
 
 do $migration$
 declare
-  v_band jsonb := jsonb_build_object(
-    'minSqft', 400,
-    'maxSqft', 500,
-    'source', 'package',
-    'system', 'solid',
-    'size', '2'
-  );
   v_staff jsonb;
   v_floor jsonb;
+  v_bands jsonb;
+  v_kept jsonb := '[]'::jsonb;
+  v_band jsonb;
+  v_removed boolean := false;
   v_row public.price_book%rowtype;
 begin
   perform set_config('es.price_book_version_assigned', 'on', true);
@@ -38,18 +39,37 @@ begin
     v_floor := v_staff#>'{rates,smallSolidFloor}';
     if jsonb_typeof(v_floor) <> 'object' then
       v_floor := '{}'::jsonb;
-      v_staff := jsonb_set(v_staff, '{rates,smallSolidFloor}', v_floor, true);
     end if;
 
     if v_floor->'min' is null then
-      v_staff := jsonb_set(v_staff, '{rates,smallSolidFloor,min}', '2750'::jsonb, true);
+      v_floor := jsonb_set(v_floor, '{min}', '2750'::jsonb, true);
     end if;
-    if v_floor->'maxSqft' is null or v_floor->>'maxSqft' = '500' then
-      v_staff := jsonb_set(v_staff, '{rates,smallSolidFloor,maxSqft}', '400'::jsonb, true);
+
+    v_bands := v_floor->'bands';
+    if jsonb_typeof(v_bands) = 'array' then
+      for v_band in select value from jsonb_array_elements(v_bands)
+      loop
+        if coalesce(v_band->>'source', '') in ('package', 'garagePackage')
+           and coalesce(v_band->>'system', 'solid') = 'solid'
+           and coalesce(v_band->>'size', v_band->>'packageSize', '2') in ('2', '2car', 'twoCar')
+           and v_band->'min' is null
+           and v_band->'amount' is null
+           and v_band->>'minSqft' = '400'
+           and v_band->>'maxSqft' = '500'
+        then
+          v_removed := true;
+          continue;
+        end if;
+        v_kept := v_kept || jsonb_build_array(v_band);
+      end loop;
+      v_floor := jsonb_set(v_floor, '{bands}', v_kept, true);
     end if;
-    if v_floor->'bands' is null then
-      v_staff := jsonb_set(v_staff, '{rates,smallSolidFloor,bands}', jsonb_build_array(v_band), true);
+
+    if v_floor->'maxSqft' is null or (v_removed and v_floor->>'maxSqft' = '400') then
+      v_floor := jsonb_set(v_floor, '{maxSqft}', '500'::jsonb, true);
     end if;
+
+    v_staff := jsonb_set(v_staff, '{rates,smallSolidFloor}', v_floor, true);
 
     update public.price_book
        set staff_settings = v_staff,
