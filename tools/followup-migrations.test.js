@@ -8,13 +8,13 @@ function check(name,fn){try{fn();console.log('ok',name);}catch(e){failed++;conso
 
 const root=path.join(__dirname,'..');
 const read=rel=>fs.readFileSync(path.join(root,rel),'utf8');
-const followup=read('supabase/migrations/20261112110000_cost_model_followup.sql');
-const trigger=read('supabase/migrations/20261112113000_price_book_version_trigger.sql');
-const unique=read('supabase/migrations/20261112120000_jobs_job_number_unique.sql');
-const previous=read('supabase/migrations/20261112053000_cost_model_owner_defaults.sql');
+const followup=read('supabase/migrations/20261112074520_cost_model_followup.sql');
+const trigger=read('supabase/migrations/20261112074535_price_book_version_trigger.sql');
+const unique=read('supabase/migrations/20261112074537_jobs_job_number_unique.sql');
+const previous=read('supabase/migrations/20261112034714_cost_model_owner_defaults.sql');
 const quote=read('js/quote-core.js');
-const record=read('supabase/migrations/20261110160000_record_approved_discount_columns.sql');
-const numbering=read('supabase/migrations/20261111090000_job_numbering.sql');
+const record=read('supabase/migrations/20261110085927_record_approved_discount_columns.sql');
+const numbering=read('supabase/migrations/20261111225042_job_numbering.sql');
 
 function forbidDataLoss(sql,file){
   assert.ok(!/\bdelete\s+from\b/i.test(sql),file+' deletes rows');
