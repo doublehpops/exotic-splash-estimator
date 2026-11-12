@@ -1964,9 +1964,11 @@ function boardChoice(key,label,pairs){
   return `<div class="field"><label for="board-${escape(key)}">${escape(label)}</label><select id="board-${escape(key)}" data-board-filter="${escape(key)}">${pairs.map(([v,t])=>`<option value="${escape(v)}"${current===String(v)?' selected':''}>${escape(t)}</option>`).join('')}</select></div>`;
 }
 function jobsDataBanner(){
+  const employee=!isOwner();
+  const who=employee?'Employee preview. Search, sort, and filter only. No delete or archive.':'Owner preview.';
   if(!authMode())return '<div class="sample-banner" data-demo-banner="offline"><b>OFFLINE DEMO DATA.</b> These jobs stay in this browser. They are not loaded from the server.</div>';
   const id=runtime.profile&&runtime.profile.id||'';
-  if(String(id).indexOf('preview-')===0)return '<div class="sample-banner" data-demo-banner="preview"><b>OFFLINE DEMO DATA.</b> Illustrative jobs for this screen only. Not live customers, and not loaded from the server.</div>';
+  if(String(id).indexOf('preview-')===0)return '<div class="sample-banner" data-demo-banner="preview"><b>OFFLINE DEMO DATA.</b> '+who+' Illustrative jobs, not loaded from the server.</div>';
   return '';
 }
 function jobBoardHTML(){
@@ -1990,7 +1992,7 @@ function jobBoardHTML(){
     ${boardChoice('city','City',[['', 'Any city']].concat(cities.map(c=>[c,c])))}
     ${boardChoice('zip','ZIP',[['', 'Any ZIP']].concat(zips.map(z=>[z,z])))}
     ${boardChoice('crew','Crew',[['', 'Any crew'],['__unassigned__','Unassigned']].concat(crews.map(c=>[c,c])))}
-    ${boardChoice('estimator','Estimator',[['', 'Any estimator']].concat(estimators.map(n=>[n,n])))}
+    ${boardChoice('estimator','Who took the estimate',[['', 'Anyone']].concat(estimators.map(n=>[n,n])))}
     ${boardChoice('dateField','Date field',[['updated',L.dateField.updated],['created',L.dateField.created],['job',L.dateField.job]])}
     <div class="field"><label for="jobBoardDateFrom">From</label><input id="jobBoardDateFrom" type="date" value="${escape(f.dateFrom)}"></div>
     <div class="field"><label for="jobBoardDateTo">To</label><input id="jobBoardDateTo" type="date" value="${escape(f.dateTo)}"></div>
@@ -2000,7 +2002,7 @@ function jobBoardHTML(){
     ${boardChoice('group','Group',B.GROUPS.map(s=>[s,L.group[s]]))}
   </div>`;
   const bulk=owner?`<div class="inline-actions"><button type="button" class="button danger" id="jobBoardDeleteSelected">Delete selected</button></div>`:'';
-  return `<section class="card job-board">${jobsDataBanner()}
+  return `<section class="card job-board" data-jobs-role="${owner?'owner':'employee'}">${jobsDataBanner()}
     <div class="field"><label for="jobBoardQuery">Search</label><input id="jobBoardQuery" type="search" value="${escape(f.q)}" placeholder="Customer, company, address, city, ZIP, job number, or phone" autocomplete="off"></div>
     <p class="method-note" id="jobBoardCount">${escape(jobBoardCountText())}</p>
     ${filters}
@@ -2129,10 +2131,10 @@ function handleJobBoardClick(t){
 function jobsView(){
   const owner=isOwner();
   const preview=authMode()&&runtime.profile&&String(runtime.profile.id||'').indexOf('preview-')===0;
-  const sub=preview?'Offline demo data on this screen. Not loaded from the server.'
-    :(authMode()?(owner?'Search and filter every company job. Archive and delete stay on this account.':'Search and filter the jobs this account can already open.')
+  const sub=preview?(owner?'Offline demo data. Not loaded from the server.':'Offline demo data for an employee. Not loaded from the server. Search, sort, and filter only the sample jobs on this screen.')
+    :(authMode()?(owner?'Search and filter every company job. Archive and delete stay on this account.':'Search, sort, and filter the jobs this account can already open. Customer totals only.')
     :'Search and filter jobs kept in this browser.');
-  const head=authMode()?heading('JOBS','Jobs.',sub,''):heading('LOCAL JOBS','Jobs.','Offline demo. Nothing here is loaded from a server.','');
+  const head=authMode()?heading(owner?'JOBS':'YOUR JOBS',owner?'Jobs.':'Your jobs.',sub,''):heading('LOCAL JOBS',owner?'Jobs.':'Your jobs.',owner?'Offline demo. Nothing here is loaded from a server.':'Offline demo for a worker. Search and sort stay. Delete and archive do not.','');
   const extra=authMode()&&runtime.jobsExtraHTML?runtime.jobsExtraHTML():'';
   return head+extra+jobBoardHTML();
 }

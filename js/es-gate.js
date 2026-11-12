@@ -119,13 +119,7 @@ async function enterApp(){
     const rows=await cloud.listJobs({includeArchived:true});
     const markups={};
     if(owner){for(const m of await cloud.listJobMarkups())markups[m.job_id]=Number(m.markup_pct)}
-    let estimatorDirectory={};
-    try{
-      const people=await cloud.staffDirectory();
-      for(const p of people||[]){
-        if(p&&p.id&&p.displayName)estimatorDirectory[p.id]=String(p.displayName);
-      }
-    }catch(e){estimatorDirectory={}}
+    const estimatorDirectory=await loadEstimatorDirectory();
     const jobs=rows.map(r=>rowToJob(r,owner?markups[r.id]:undefined,settings));
     applyOutbox(profile.id,jobs);
     rt={mode:'auth',profile,settings,jobs,priceBook:{version:pb?pb.version:null,updatedAt:pb?pb.updated_at:null,ownerEmpty:owner?isEmptyBook(pb):null,sig:owner?bookSig(settings):null},
@@ -144,6 +138,21 @@ async function enterApp(){
   }catch(e){showError(e.message||String(e))}
 }
 function isEmptyBook(pb){return !pb||!pb.owner_settings||!Object.keys(pb.owner_settings).length}
+async function loadEstimatorDirectory(){
+  const out={};
+  const take=rows=>{
+    for(const p of rows||[]){
+      if(!p||!p.id)continue;
+      const name=String(p.displayName||p.full_name||'').trim();
+      if(name)out[p.id]=name.slice(0,80);
+    }
+  };
+  try{take(await cloud.staffDirectory())}catch(e){}
+  if(!Object.keys(out).length&&cloud.listProfileNames){
+    try{take(await cloud.listProfileNames())}catch(e){}
+  }
+  return out;
+}
 function bookSig(settings){const s=Q().splitSettings(settings);return JSON.stringify(s)}
 function rowToJob(r,markup,settings){
   const d=Object.assign({},r.job_data||{});
@@ -649,7 +658,8 @@ function startPreview(kind){
   const employee=kind==='employee';
   const settings=JSON.parse(JSON.stringify(E().defaults));
   settings.business.crews=['North crew','South crew','Garage crew'];
-  rt={mode:'auth',profile:{id:employee?'preview-staff':'preview-owner',email:employee?'sam@example.com':'owner@example.com',full_name:employee?'Sam Ellis':'Preview Owner',role:employee?'employee':'owner',active:true},settings,jobs:fresh?[]:previewBoardJobs(),syncStatus:'saved',
+  const previewJobs=fresh?[]:previewBoardJobs().filter(j=>!employee||j._createdBy==='preview-staff');
+  rt={mode:'auth',profile:{id:employee?'preview-staff':'preview-owner',email:employee?'sam@example.com':'owner@example.com',full_name:employee?'Sam Ellis':'Preview Owner',role:employee?'employee':'owner',active:true},settings,jobs:previewJobs,syncStatus:'saved',
     estimatorDirectory:{'preview-owner':'Preview Owner','preview-staff':'Sam Ellis'},
     onSave(){D.querySelectorAll('.save-pill').forEach(el=>{el.textContent='Saving…';el.dataset.state='saving'});clearTimeout(startPreview._t);startPreview._t=setTimeout(()=>D.querySelectorAll('.save-pill').forEach(el=>{el.textContent='Saved';el.dataset.state='saved'}),450)},
     requestPreview(){},discountCall:async()=>({ok:false,error:'Preview only'}),
