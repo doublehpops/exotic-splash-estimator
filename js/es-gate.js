@@ -29,7 +29,7 @@ function demoButton(){return `<button type="button" class="gate-demo" id="gateDe
 function showUnconfigured(){
   gateShell(`<h1 data-gate-state="unconfigured">Sign-in is not configured yet</h1>
   <p>This copy of the estimator has no Supabase project connected, so staff sign-in is unavailable. Nothing is sent anywhere.</p>
-  <ol class="gate-steps"><li>Owner (Double): follow <b>SUPABASE_SETUP.md</b> to create the project and run the migrations.</li><li>Put the project URL and the public <b>anon / publishable</b> key in <code>public-config.js</code> (never the service_role / secret key).</li><li>Reload this page to see the login screen.</li></ol>
+  <ol class="gate-steps"><li>Owner: follow <b>SUPABASE_SETUP.md</b> to create the project and run the migrations.</li><li>Put the project URL and the public <b>anon / publishable</b> key in <code>public-config.js</code> (never the service_role / secret key).</li><li>Reload this page to see the login screen.</li></ol>
   ${demoButton()}`);
 }
 function showInvalid(errors){
